@@ -292,12 +292,47 @@ def leg4_decoy_sweep():
           len(rejected) == 1 and not allowed)
 
 
+def leg5_shim_drift():
+    """The _gate_fallback shim claims to mirror satus/hooks/autonomy_gate.
+    A comment can't enforce that; this leg does. Cell machines only —
+    standalone repos have no real organ to diff against (skip, don't fake)."""
+    print("LEG 5 — shim drift check (_gate_fallback vs real autonomy_gate)")
+    real_path = Path("C:/kit.triv/satus/hooks/autonomy_gate.py")
+    if not real_path.exists():
+        print("  [SKIP] no real autonomy_gate on this machine (standalone)")
+        return
+    sys.path.insert(0, str(real_path.parent))
+    import autonomy_gate as real  # noqa: E402
+    import _gate_fallback as shim  # noqa: E402
+
+    real_rx = [(r.pattern, r.flags) for r in real.DESTRUCTIVE_REGEXES]
+    shim_rx = [(r.pattern, r.flags) for r in shim.DESTRUCTIVE_REGEXES]
+    check("destructive-command regexes identical (pattern + flags)",
+          real_rx == shim_rx,
+          receipt="real=%r shim=%r" % (real_rx, shim_rx))
+    check("destructive-file patterns identical",
+          list(real.DESTRUCTIVE_FILE_PATTERNS)
+          == list(shim.DESTRUCTIVE_FILE_PATTERNS),
+          receipt="real=%r shim=%r" % (real.DESTRUCTIVE_FILE_PATTERNS,
+                                       shim.DESTRUCTIVE_FILE_PATTERNS))
+    # Behavioral spot check: both organs must agree verdict-for-verdict.
+    battery = ["rm -rf build/", "git push --force", "echo hello",
+               'python -c "DELETE FROM x"', "DELETE FROM users",
+               "git reset --hard HEAD~1"]
+    disagree = [c for c in battery
+                if real.is_destructive_command(c)
+                != shim.is_destructive_command(c)]
+    check("organs agree on the command battery", disagree == [],
+          receipt="disagree=%r" % disagree)
+
+
 def main():
     print("gate_band_loadbearing.py — Club's kill-test gate (offline)")
     leg1_kill_test()
     leg2_negative_controls()
     leg3_consume_path()
     leg4_decoy_sweep()
+    leg5_shim_drift()
     print("%d/%d gate checks passed" % (len(RAN) - len(FAILURES), len(RAN)))
     if FAILURES:
         print("GATE FAIL: %s" % ", ".join(FAILURES))
