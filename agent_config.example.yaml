@@ -1,0 +1,21 @@
+# Band per-agent credentials — copy to agent_config.yaml (gitignored) and fill in.
+# Get values: app.band.ai/dashboard -> create Remote Agent -> popup shows API Key,
+# Agent UUID is bottom-right of the agent page. One entry per 4-loop role
+# (BAND_OF_AGENTS_SPEC.md: gamer=planner, diamond=engineer, club=reviewer,
+# nucleus=coordinator).
+
+gamer:
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+diamond:
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+club:
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+nucleus:
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"

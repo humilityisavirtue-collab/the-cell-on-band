@@ -1,0 +1,12 @@
+# Secrets — never tracked. The scar tissue is real.
+.env
+agent_config.yaml
+
+# Runtime state
+consent_state.json
+band_archive.jsonl
+usage_log.jsonl
+
+# Python
+__pycache__/
+*.pyc
