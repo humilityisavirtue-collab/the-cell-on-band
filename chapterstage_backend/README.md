@@ -24,8 +24,8 @@ fails regardless of feature completeness. This is enforced in code:
 
 ## Security: the generated site is untrusted until it passes
 
-A generated experience cannot reach the network or run injected code. The boundary
-is a **server-enforced Content-Security-Policy** (`connect-src 'none'; script-src
+A generated experience is blocked from reaching the network or running injected code
+by a server-enforced, default-deny Content-Security-Policy (`connect-src 'none'; script-src
 'self'`, no `unsafe-*`) on `/public/experiences` — browser-enforced, default-deny,
 and **un-weakenable by the page** (CSP combines by intersection). A regex denylist
 alone would lose to obfuscation (`window['fet'+'ch']`); the CSP allowlist does not.
@@ -59,4 +59,5 @@ python tests/test_site_validator.py       # M5 site security (allowlist CSP)
 
 M1 (API + DB), M3 (orchestration), M4 (Band invariant), M5 (site validator) are
 built and gated. M2 (SSE progress) and M6 (full demo) are in progress. The API
-DTOs follow the frontend handoff contract (§9); see `app/schemas.py`.
+DTOs follow the frontend handoff contract (§9; transcription pending source
+diff-check); see `app/schemas.py`.
