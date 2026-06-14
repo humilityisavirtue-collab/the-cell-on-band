@@ -1,0 +1,62 @@
+# ChapterStage on Band — per-agent credentials.
+# Product: turn a book chapter into a verified interactive learning module
+# via a visible team of specialist agents (deck: chapterstage_band_product_flow.pptx).
+#
+# Distinct from agent_config.example.yaml (that's the K-Cell software-delivery
+# 4-loop). This is the ChapterStage roster.
+#
+# HOOKUP STEPS (do this on app.band.ai/dashboard):
+#   1. Create one Remote Agent per role below. Name it the SAME as the key
+#      here (lowercase) — Band routes by @mention, so @structure must match.
+#   2. The creation popup shows the API Key. The Agent UUID is bottom-right
+#      of the agent page. Paste both here.
+#   3. cp this file -> chapterstage_agent_config.yaml (gitignored) and fill.
+#
+# Artifact contract (the chain each agent hands down — deck slide 7):
+#   Chapter Knowledge Pack -> Brainstorm Variants/Scores -> Storyboard JSON -> Verified Module
+#
+# Transport note (OPEN SEAM): BandTransport.connect() is wired but not yet
+# live-verified against the SDK. Creating the agents on the dashboard is
+# unaffected — do it now; the connect() wiring lands at/after kickoff.
+
+# ============================ MVP-5 (demo path, slide 7) ============================
+# Create these five first — they are the agents the demo actually exercises.
+
+coordinator:          # starts the room, @mentions agents, resolves conflicts, triggers render
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+structure:            # chapter sections, core ideas, dependency map -> Chapter Knowledge Pack
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+pedagogy:             # learning objectives, likely confusions, quiz checkpoints
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+brainstorm:           # propose -> score -> select -> mutate (the auto-brainstorm loop)
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+visual:               # interactive scene plan + frontend Storyboard JSON -> Rendered Module
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+# ===================== STRONGLY RECOMMENDED #6 (the differentiator) =====================
+# Verifier is the shared thesis ("VERIFIED module") and maps directly onto our
+# chassis's strongest reusable piece (done-only-on-PASS gate). Add it if you can.
+
+verifier:             # source-faithfulness review, risk flags, approval (gate)
+  agent_id: "<agent-uuid>"
+  api_key: "<api-key>"
+
+# ============================ DEFER (post-MVP) ============================
+# Create only if time allows after the demo path runs end-to-end.
+
+# research:           # external context / citations
+#   agent_id: "<agent-uuid>"
+#   api_key: "<api-key>"
+
+# critic:             # engagement score (separate from faithfulness)
+#   agent_id: "<agent-uuid>"
+#   api_key: "<api-key>"

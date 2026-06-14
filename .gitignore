@@ -7,6 +7,16 @@ consent_state.json
 band_archive.jsonl
 usage_log.jsonl
 
+# Secrets — filled-in ChapterStage roster
+chapterstage_agent_config.yaml
+
 # Python
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+
+# ChapterStage backend runtime
+*.db
+chapterstage_backend/static/
+chapterstage_backend/.venv/
