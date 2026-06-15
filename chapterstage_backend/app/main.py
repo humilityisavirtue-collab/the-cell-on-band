@@ -15,7 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import chapters, health, jobs
+from app.api.v1 import auth, chapters, experiences, health, jobs
 from app.config import settings
 from app.errors import APIError, INTERNAL_ERROR, INVALID_REQUEST, api_error_handler
 
@@ -31,8 +31,10 @@ app = FastAPI(title="ChapterStage Backend", version=settings.VERSION,
               lifespan=lifespan)
 
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(chapters.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
+app.include_router(experiences.router, prefix="/api/v1")
 
 
 @app.exception_handler(APIError)

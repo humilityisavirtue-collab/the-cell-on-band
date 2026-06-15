@@ -21,6 +21,28 @@ class HealthResponse(BaseModel):
     version: str = "0.1.0"
 
 
+class UserResponse(BaseModel):
+    user_id: str
+    email: str
+    created_at: datetime
+
+
+class AuthRegisterRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8, max_length=200)
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
 # § 9.2 POST /chapters/text
 class ChapterTextRequest(BaseModel):
     book_title: Optional[str] = None
@@ -67,3 +89,19 @@ class JobStatusResponse(BaseModel):
     error: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+
+
+class ReaderProgressUpdate(BaseModel):
+    current_screen_id: Optional[str] = None
+    completed_screen_ids: list[str] = Field(default_factory=list)
+    last_checkpoint: Optional[str] = None
+    interaction_state: dict = Field(default_factory=dict)
+
+
+class ReaderProgressResponse(BaseModel):
+    experience_id: str
+    current_screen_id: Optional[str] = None
+    completed_screen_ids: list[str] = Field(default_factory=list)
+    last_checkpoint: Optional[str] = None
+    interaction_state: dict = Field(default_factory=dict)
+    updated_at: Optional[datetime] = None

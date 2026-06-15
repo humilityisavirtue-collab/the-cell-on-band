@@ -18,7 +18,7 @@
 - Add missing runtime dependencies to `chapterstage_backend/requirements.txt`:
   - `greenlet`
   - `pypdf`
-  - `passlib[bcrypt]` or equivalent password hashing package
+  - `passlib` or equivalent password hashing package
   - `python-jose` or equivalent token package if JWT is used
   - optional later: `band-sdk[langgraph]`
 - Re-run current tests after dependency fix:

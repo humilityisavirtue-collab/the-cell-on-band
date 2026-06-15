@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column
+from sqlalchemy import Column, String, UniqueConstraint
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
@@ -28,6 +28,24 @@ class Book(SQLModel, table=True):
     title: str
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
+
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    email: str = Field(sa_column=Column(String, unique=True, index=True))
+    password_hash: str
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class UserSession(SQLModel, table=True):
+    __tablename__ = "user_sessions"
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    user_id: str = Field(foreign_key="users.id", index=True)
+    token_hash: str = Field(sa_column=Column(String, unique=True, index=True))
+    created_at: datetime = Field(default_factory=_now)
+    last_seen_at: datetime = Field(default_factory=_now)
 
 
 class Chapter(SQLModel, table=True):
@@ -83,3 +101,21 @@ class AgentTraceEvent(SQLModel, table=True):
     message: str
     payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_now)
+
+
+class ReaderProgress(SQLModel, table=True):
+    __tablename__ = "reader_progress"
+    __table_args__ = (
+        UniqueConstraint("user_id", "experience_id",
+                         name="uq_reader_progress_user_experience"),
+    )
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    user_id: str = Field(foreign_key="users.id", index=True)
+    experience_id: str = Field(index=True)
+    current_screen_id: str | None = None
+    completed_screen_ids: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON))
+    last_checkpoint: str | None = None
+    interaction_state: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
