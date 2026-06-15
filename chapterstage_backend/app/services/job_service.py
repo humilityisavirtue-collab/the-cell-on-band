@@ -102,7 +102,8 @@ async def run_generation_job(job_id: str) -> None:
             from workflows.chapter_graph import ChapterWorkflow
 
             band = create_band_service()
-            state = ChapterWorkflow(band).run(job.id, chapter.title)
+            state = ChapterWorkflow(band).run(
+                job.id, chapter.title, chapter.source_text or "")
             job.band_room_id = getattr(band, "room_id", None)
             await session.commit()
             await _trace_handoffs(session, job, band)

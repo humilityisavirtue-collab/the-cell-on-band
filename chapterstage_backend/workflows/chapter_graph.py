@@ -33,12 +33,13 @@ class ChapterWorkflow:
             band_service = create_band_service()
         self.band = band_service
 
-    def run(self, job_id: str, source_ref: str) -> dict:
+    def run(self, job_id: str, source_ref: str, source_text: str = "") -> dict:
         self.band.open_room(job_id)
         for role, _slot, _fn, _to in nodes.STAGES:
             self.band.recruit(role)
 
         state: dict = {"job_id": job_id, "source_ref": source_ref,
+                       "source_text": source_text,
                        "status": "running", "log": []}
 
         for role, slot, node_fn, to_role in nodes.STAGES:
