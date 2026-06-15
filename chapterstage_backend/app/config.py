@@ -51,6 +51,21 @@ class Settings:
         self.BAND_AGENT_UUID_VERIFIER: str = os.environ.get(
             "BAND_AGENT_UUID_VERIFIER", "")
 
+        self.LLM_PROVIDER: str = os.environ.get("LLM_PROVIDER", "auto")
+        self.OLLAMA_BASE_URL: str = os.environ.get(
+            "OLLAMA_BASE_URL", "http://localhost:11434")
+        self.OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "")
+        self.OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
+        self.OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "")
+        self.OPENAI_BASE_URL: str = os.environ.get(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1")
+        self.ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
+        self.ANTHROPIC_MODEL: str = os.environ.get("ANTHROPIC_MODEL", "")
+        self.FEATHERLESS_API_KEY: str = os.environ.get("FEATHERLESS_API_KEY", "")
+        self.FEATHERLESS_MODEL: str = os.environ.get("FEATHERLESS_MODEL", "")
+        self.FEATHERLESS_BASE_URL: str = os.environ.get(
+            "FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1")
+
         self.VERSION: str = "0.1.0"
 
 
