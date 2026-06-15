@@ -7,20 +7,34 @@
 - Use FastAPI as the backend service.
 - Use SQLAlchemy/SQLModel for persistence.
 - Use a modular generated-site architecture: static chapter shell plus progressive screen/component rendering.
-- Persist reader progress in the backend database and resume from the last checkpoint.
+- Persist one anonymous global reader-progress record per experience in the local database and resume from the last checkpoint.
+- Do not add authentication for visualization pages in this MVP. The generated chapter pages are anonymous and share progress globally.
 - Use Ollama as the local-first LLM provider.
 - Add a provider abstraction so OpenAI, Anthropic/Claude, Featherless, or other providers can be enabled through environment variables later.
 - Provider selection should be dynamic: use the first configured provider by priority, with Ollama preferred for local development.
 - Default Band transport mode must be offline and deterministic. Real Band SDK calls happen only when `BAND_TRANSPORT_MODE=live`.
+
+## Implementation Status
+
+- Completed through `codex/stage-7-anonymous-progress`:
+  - FastAPI service skeleton, SQLModel persistence, generated static site serving, and strict public-site CSP.
+  - Selectable Band transport with deterministic test mode and fail-fast live mode.
+  - Modular generated-site contract with progressive screen loading.
+  - Ollama-first provider abstraction with OpenAI, Anthropic/Claude, and Featherless portability hooks.
+  - Provider-backed agent hooks with the Cell-on-Band handoff invariant preserved.
+  - Background job execution, SSE replay, agent trace persistence, publishing, experience metadata lookup, recent job listing, and global anonymous progress.
+- Still pending:
+  - Production-grade schema migrations for non-SQLite databases.
+  - Real live Band SDK smoke testing with credentials.
+  - Rich generated visualization components beyond the current minimal modular shell.
+  - Provider failure/retry hardening across all agent outputs.
 
 ## Phase 0: Runtime And Dependency Fixes
 
 - Add missing runtime dependencies to `chapterstage_backend/requirements.txt`:
   - `greenlet`
   - `pypdf`
-  - `passlib` or equivalent password hashing package
-  - `python-jose` or equivalent token package if JWT is used
-  - optional later: `band-sdk[langgraph]`
+  - optional live mode: `band-sdk[langgraph]` in `requirements-live.txt`
 - Re-run current tests after dependency fix:
   - `./venv/bin/python chapterstage_backend/tests/test_api_jobs.py`
   - `./venv/bin/python chapterstage_backend/tests/test_public_csp.py`
@@ -70,32 +84,23 @@
   - severed test transport stalls workflow
   - existing load-bearing tests still pass
 
-## Phase 1: User Accounts And Reader Progress
+## Phase 1: Global Anonymous Reader Progress
 
-- Add account models:
-  - `User`
-  - `UserSession` or token table
-  - `ReaderProgress`
-- MVP auth assumption:
-  - email/password registration and login
-  - opaque bearer token or JWT
-  - `get_current_user` FastAPI dependency
-- Add auth endpoints:
-  - `POST /api/v1/auth/register`
-  - `POST /api/v1/auth/login`
-  - `GET /api/v1/auth/me`
+- Do not create account/auth models for visualization pages.
+- Remove auth endpoints and auth dependencies from the MVP backend.
+- Add `ReaderProgress` model only.
 - Add progress endpoints:
   - `GET /api/v1/experiences/{experience_id}/progress`
   - `PUT /api/v1/experiences/{experience_id}/progress`
 - Persist progress fields:
-  - `user_id`
   - `experience_id`
   - `current_screen_id`
   - `completed_screen_ids`
   - `last_checkpoint`
   - `interaction_state`
   - `updated_at`
-- Ensure progress is scoped by authenticated user and experience.
+- Ensure progress is globally scoped by experience only.
+- If old SQLite dev databases still have user-scoped `reader_progress`, migrate latest progress per experience into the global table on startup.
 
 ## Phase 2: Modular Site Contract
 
@@ -130,7 +135,7 @@
   - render only the current screen
   - lazy-load next screen data
   - save progress after screen completion/checkpoint
-  - resume from backend progress when opened by a logged-in user
+  - resume from backend progress without requiring auth, cookies, or a user account
 - Keep generated site CSP-compatible:
   - allow only same-origin backend progress APIs if progress sync is called from the generated shell
   - continue blocking arbitrary remote network calls
@@ -145,8 +150,7 @@
   - no path traversal in screen/assets refs
   - no oversized screen payloads
 - Revisit CSP policy:
-  - current `connect-src 'none'` blocks progress API calls
-  - change to same-origin only if backend progress sync is required from generated site
+  - keep `connect-src 'self'` so the static shell can sync progress with the same-origin backend
   - test that remote network calls still fail
 - Add tests:
   - modular clean site passes
@@ -222,6 +226,8 @@
   - `GET /api/v1/generation-jobs/{job_id}/events`
 - Add trace endpoint:
   - `GET /api/v1/generation-jobs/{job_id}/trace`
+- Add recent jobs endpoint:
+  - `GET /api/v1/generation-jobs?limit=&offset=`
 - Store agent trace events in the existing `AgentTraceEvent` table.
 
 ## Phase 7: Publishing And Resume Flow
@@ -235,21 +241,17 @@
   - `GET /api/v1/experiences/{experience_id}`
 - Ensure opening a public experience:
   - loads shell
-  - authenticates or detects user session
-  - requests backend progress
+  - requests global backend progress anonymously
   - resumes at last checkpoint
   - saves new progress as the reader advances
 
 ## Phase 8: Tests To Add
 
-- Auth:
-  - register/login success
-  - bad login rejected
-  - protected progress endpoint requires auth
 - Progress:
-  - save progress
-  - resume progress
-  - progress isolated between users
+  - auth endpoints are not mounted
+  - save global anonymous progress
+  - resume global anonymous progress across clients
+  - keep progress separate between experiences
 - Modular site:
   - valid modular site passes validator
   - invalid screen schema rejected
@@ -263,3 +265,5 @@
   - agent outputs persist trace events
   - generated experience gets public URL
   - severed Band transport still prevents completion
+  - experience metadata endpoint returns published experience
+  - recent jobs endpoint lists created jobs

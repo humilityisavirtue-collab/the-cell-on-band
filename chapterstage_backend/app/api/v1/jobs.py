@@ -1,16 +1,16 @@
 """jobs.py — generation jobs: create, status, events, trace."""
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.config import settings
 from app.database import get_session
-from app.models import AgentTraceEvent
+from app.models import AgentTraceEvent, GenerationJob
 from app.schemas import (JobCreateRequest, JobCreateResponse, JobStatusResponse,
-                         JobTraceResponse, TraceEventResponse)
+                         JobListResponse, JobTraceResponse, TraceEventResponse)
 from app.services import job_service, sse_bus
 
 router = APIRouter(prefix="/generation-jobs", tags=["jobs"])
@@ -18,6 +18,31 @@ router = APIRouter(prefix="/generation-jobs", tags=["jobs"])
 
 def _base(job_id: str) -> str:
     return "%s/api/v1/generation-jobs/%s" % (settings.API_BASE_URL, job_id)
+
+
+def _job_status_response(job: GenerationJob) -> JobStatusResponse:
+    error = None
+    if job.error_code:
+        error = {"code": job.error_code, "message": job.error_message or ""}
+    return JobStatusResponse(
+        job_id=job.id, chapter_id=job.chapter_id, status=job.status,
+        progress=job.progress, current_step=job.current_step,
+        band_room_id=job.band_room_id, experience_id=job.experience_id,
+        public_url=job.public_url, error=error,
+        created_at=job.created_at, updated_at=job.updated_at)
+
+
+@router.get("", response_model=JobListResponse)
+async def list_jobs(
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        session: AsyncSession = Depends(get_session)) -> JobListResponse:
+    jobs = await job_service.list_jobs(session, limit=limit, offset=offset)
+    return JobListResponse(
+        jobs=[_job_status_response(job) for job in jobs],
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("", response_model=JobCreateResponse, status_code=202)
@@ -37,15 +62,7 @@ async def get_job(
         job_id: str,
         session: AsyncSession = Depends(get_session)) -> JobStatusResponse:
     job = await job_service.get_job(session, job_id)
-    error = None
-    if job.error_code:
-        error = {"code": job.error_code, "message": job.error_message or ""}
-    return JobStatusResponse(
-        job_id=job.id, chapter_id=job.chapter_id, status=job.status,
-        progress=job.progress, current_step=job.current_step,
-        band_room_id=job.band_room_id, experience_id=job.experience_id,
-        public_url=job.public_url, error=error,
-        created_at=job.created_at, updated_at=job.updated_at)
+    return _job_status_response(job)
 
 
 @router.get("/{job_id}/events")

@@ -78,6 +78,15 @@ async def get_job(session: AsyncSession, job_id: str) -> GenerationJob:
     return job
 
 
+async def list_jobs(
+        session: AsyncSession, limit: int = 20,
+        offset: int = 0) -> list[GenerationJob]:
+    rows = await session.execute(
+        select(GenerationJob).order_by(
+            GenerationJob.created_at.desc()).offset(offset).limit(limit))
+    return list(rows.scalars().all())
+
+
 async def count_jobs(session: AsyncSession) -> int:
     return (await session.execute(select(func.count(GenerationJob.id)))).scalar_one()
 

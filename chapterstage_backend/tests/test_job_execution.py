@@ -66,6 +66,19 @@ def main():
               and (site_path / "screens" / "intro.json").is_file(),
               receipt=str(site_path))
 
+        r = c.get("/api/v1/experiences/%s" % status["experience_id"])
+        check("experience metadata endpoint returns public URL",
+              r.status_code == 200
+              and r.json()["experience_id"] == status["experience_id"]
+              and r.json()["public_url"] == status["public_url"],
+              receipt=r.text)
+
+        r = c.get("/api/v1/generation-jobs", params={"limit": 5, "offset": 0})
+        check("recent jobs endpoint lists generated job",
+              r.status_code == 200
+              and any(row["job_id"] == job_id for row in r.json()["jobs"]),
+              receipt=r.text)
+
         r = c.get("/api/v1/generation-jobs/%s/trace" % job_id)
         trace = r.json()
         check("trace endpoint returns Band handoff events",

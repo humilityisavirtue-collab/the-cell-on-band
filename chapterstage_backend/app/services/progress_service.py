@@ -1,4 +1,4 @@
-"""Persistence helpers for account-backed reading progress."""
+"""Persistence helpers for global anonymous reading progress."""
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -9,21 +9,19 @@ from app.schemas import ReaderProgressResponse, ReaderProgressUpdate
 
 
 async def get_progress(
-        session: AsyncSession, user_id: str,
-        experience_id: str) -> ReaderProgress | None:
+        session: AsyncSession, experience_id: str) -> ReaderProgress | None:
     return (await session.execute(
         select(ReaderProgress).where(
-            ReaderProgress.user_id == user_id,
             ReaderProgress.experience_id == experience_id,
         ))).scalar_one_or_none()
 
 
 async def upsert_progress(
-        session: AsyncSession, user_id: str, experience_id: str,
+        session: AsyncSession, experience_id: str,
         req: ReaderProgressUpdate) -> ReaderProgress:
-    row = await get_progress(session, user_id, experience_id)
+    row = await get_progress(session, experience_id)
     if row is None:
-        row = ReaderProgress(user_id=user_id, experience_id=experience_id)
+        row = ReaderProgress(experience_id=experience_id)
     row.current_screen_id = req.current_screen_id
     row.completed_screen_ids = list(dict.fromkeys(req.completed_screen_ids))
     row.last_checkpoint = req.last_checkpoint
