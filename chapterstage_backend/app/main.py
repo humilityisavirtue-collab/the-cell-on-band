@@ -15,15 +15,19 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import chapters, health, jobs
+from app.api.v1 import chapters, experiences, health, jobs
 from app.config import settings
 from app.errors import APIError, INTERNAL_ERROR, INVALID_REQUEST, api_error_handler
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    import asyncio
+
     from app.database import init_db
+    from app.services.sse_bus import bus
     await init_db()
+    bus.bind_loop(asyncio.get_running_loop())   # SSE publish hops onto this loop
     yield
 
 
@@ -33,6 +37,7 @@ app = FastAPI(title="ChapterStage Backend", version=settings.VERSION,
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(chapters.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
+app.include_router(experiences.router, prefix="/api/v1")
 
 
 @app.exception_handler(APIError)

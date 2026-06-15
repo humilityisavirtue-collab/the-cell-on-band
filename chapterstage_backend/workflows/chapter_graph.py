@@ -30,16 +30,28 @@ class ChapterWorkflow:
     def __init__(self, band_service):
         self.band = band_service
 
-    def run(self, job_id: str, source_ref: str) -> dict:
+    def run(self, job_id: str, source_ref: str, *,
+            source_text: str = "", params: dict | None = None,
+            on_stage=None) -> dict:
+        """on_stage(role, to_role, envelope, state) -> called after each stage's
+        output is validated and handed off. The runner uses it to advance job
+        status, stream SSE, and persist trace events. Optional + side-effect-only;
+        the M3/M4 gates pass it as None and the loop is unchanged."""
         self.band.open_room(job_id)
         for role, _slot, _fn, _to in nodes.STAGES:
             self.band.recruit(role)
 
         state: dict = {"job_id": job_id, "source_ref": source_ref,
+                       "source_text": source_text, "params": params or {},
                        "status": "running", "log": []}
 
         for role, slot, node_fn, to_role in nodes.STAGES:
-            env = node_fn(state)                 # the agent's own graph runs + emits
+            try:
+                env = node_fn(state)             # the agent's own graph runs + emits
+            except Exception as e:               # a node refusing (e.g. FAIL verdict
+                state["status"] = "failed"       # the contract won't ship) is an
+                state["error"] = "%s failed: %s" % (role, e)  # honest job failure,
+                return state                     # not a silent worker-thread crash
             problems = cse.validate(env)         # node output validated by the contract
             if problems:
                 state["status"] = "failed"
@@ -53,6 +65,8 @@ class ChapterWorkflow:
             if not self.band.handoff(role, to_role, env):
                 state["status"] = "stalled"
                 return state
+            if on_stage is not None:
+                on_stage(role, to_role, env, state)
 
         # completed ONLY if we got here: every handoff (incl. verifier->room) landed
         state["status"] = "completed"

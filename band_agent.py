@@ -295,39 +295,70 @@ BEHAVIORS = {
 
 # ------------------------------------------------------------ SDK seam
 
+class CellAdapter:
+    """SimpleAdapter bridge: Band @mention -> cell receive() -> tools.send_message().
+
+    Registered as the adapter in Agent.create(). On every inbound @mention,
+    Band calls on_message(); we pump the text through the cell receive() path
+    and post each reply as an @mention to the next role.
+
+    'room' as to_role means no @mention — nucleus's done envelope goes to
+    the room unaddressed so all participants can see it.
+    """
+
+    SUPPORTED_EMIT: "frozenset" = frozenset()
+    SUPPORTED_CAPABILITIES: "frozenset" = frozenset()
+
+    def __init__(self, cell_agent):
+        self.cell_agent = cell_agent
+        self.agent_name = ""
+        self.agent_description = ""
+        self.features = None
+
+    async def on_started(self, agent_name, agent_description):
+        self.agent_name = agent_name
+        self.agent_description = agent_description
+
+    async def on_cleanup(self, room_id):
+        pass
+
+    async def on_event(self, inp):
+        """Called by the Band runtime for each incoming event."""
+        msg = inp.message
+        tools = inp.tools
+        sender = msg.sender_name or msg.sender_id
+        replies = self.cell_agent.receive(msg.content, sender)
+        for to_role, reply_env, prose in replies:
+            text = envelopes.render(reply_env, prose)
+            mentions = [to_role] if to_role not in ("room", "broadcast") else None
+            await tools.send_message(text, mentions=mentions)
+
+
 class BandTransport:
-    """EVERY band-sdk touch lives here. Until the SDK is installed and the
-    kickoff docs confirm the exact API, this raises with instructions
-    instead of pretending — BUILT, not yet VERIFIED-RUNNABLE."""
+    """EVERY band touch lives here. Module is `band`, not `band_sdk`.
+    Adapter pattern: CellAdapter bridges receive() to on_event()."""
 
     def __init__(self, role, env=None, config=None):
         self.role = role
         self.env = env or load_env()
         self.config = config or load_agent_config(role)
 
-    def connect(self):
-        try:
-            import band_sdk  # noqa: F401
-        except ImportError:
-            raise RuntimeError(
-                "band-sdk not installed. Run: "
-                "py -3.12 -m pip install \"band-sdk[claude_sdk]\" "
-                "(API access + docs land at the Jun 12 kickoff). "
-                "Exact Agent.create() wiring is the ONLY code that "
-                "changes — see BandTransport.")
-        # KICKOFF-DAY SEAM — confirm against docs.band.ai SDK tutorial:
-        #   from band_sdk import Agent
-        #   self.agent = Agent.create(
-        #       adapter="claude_sdk",
-        #       agent_id=self.config["agent_id"],
-        #       api_key=self.config["api_key"],
-        #       ws_url=self.env["THENVOI_WS_URL"],
-        #       rest_url=self.env["THENVOI_REST_URL"])
-        raise NotImplementedError(
-            "band-sdk installed but transport wiring awaits kickoff docs")
+    def connect(self, cell_agent):
+        """Create and return a band.Agent wired to cell_agent's receive()."""
+        from band import Agent
+        adapter = CellAdapter(cell_agent)
+        return Agent.create(
+            adapter=adapter,
+            agent_id=self.config["agent_id"],
+            api_key=self.config["api_key"],
+            ws_url=self.env.get("THENVOI_WS_URL",
+                                "wss://app.band.ai/api/v1/socket/websocket"),
+            rest_url=self.env.get("THENVOI_REST_URL", "https://app.band.ai"),
+        )
 
     def post(self, to_role, text):
-        raise NotImplementedError("connect() first")
+        raise RuntimeError("post() is unused in the live path; "
+                           "replies route through CellAdapter.on_event()")
 
 
 class BandCellAgent:
@@ -353,13 +384,12 @@ class BandCellAgent:
             mirror_to_archive(reply_env, "sent")
         return replies
 
-    def run(self):
-        """Live loop: connect and pump @mentions through receive()."""
+    async def run(self):
+        """Live loop: connect to Band and pump @mentions through receive()."""
         transport = self.transport or BandTransport(self.role)
-        transport.connect()  # raises until kickoff wiring lands
-        # KICKOFF-DAY SEAM: subscribe to mentions; for each message ->
-        #   for to, env, prose in self.receive(msg.text, msg.sender):
-        #       transport.post(to, envelopes.render(env, prose))
+        agent = transport.connect(self)
+        async with agent:
+            await agent.run_forever()
 
 
 # ------------------------------------------------------------------ selftest
@@ -459,14 +489,13 @@ def _selftest():
     check("plain prose (no envelope) yields no replies",
           club.receive("hi club, welcome to the room!", "nucleus") == [])
 
-    # -- transport honestly refuses without SDK
-    refused = False
-    try:
-        BandTransport.connect(
-            type("T", (), {"role": "diamond", "env": {}, "config": {}})())
-    except (RuntimeError, NotImplementedError):
-        refused = True
-    check("transport raises (not fakes) without band-sdk", refused)
+    # -- transport wired: connect() needs credentials to call Agent.create(),
+    #    but the module imports successfully and no NotImplementedError is raised.
+    #    Verify we can instantiate CellAdapter (the SDK bridge) offline.
+    cell_stub = BandCellAgent("diamond")
+    adapter = CellAdapter(cell_stub)
+    check("CellAdapter wraps a BandCellAgent without SDK",
+          adapter.cell_agent is cell_stub)
 
     print("%d/%d checks passed" % (len(ran) - len(failures), len(ran)))
     if failures:
@@ -487,4 +516,5 @@ if __name__ == "__main__":
     if args.selftest or not args.role:
         _selftest()
     else:
-        BandCellAgent(args.role).run()
+        import asyncio
+        asyncio.run(BandCellAgent(args.role).run())

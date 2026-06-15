@@ -22,6 +22,8 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
+import asyncio  # noqa: E402
+
 from band_agent import (  # noqa: E402
     LOOP_ROLES, BandCellAgent, load_agent_config, load_env,
 )
@@ -59,6 +61,11 @@ def preflight(verbose=True):
     return problems
 
 
+async def _run_pod(agents):
+    """Run all 4 cell agents concurrently on Band."""
+    await asyncio.gather(*(a.run() for a in agents))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", help="the demo ask gamer will decompose")
@@ -74,15 +81,11 @@ def main():
         print("refusing to launch with %d preflight problems" % len(problems))
         sys.exit(1)
 
-    # KICKOFF-DAY SEAM — wire against confirmed SDK docs:
-    # 1. agents = {role: BandCellAgent(role) for role in LOOP_ROLES}
-    # 2. nucleus opens room `args.room`, recruits the other three
-    #    (add-agent-chat-participant), posts the ask @gamer.
-    # 3. asyncio.gather(*(a.run() for a in agents.values()))
-    agents = {role: BandCellAgent(role) for role in LOOP_ROLES}
-    print("4 agents constructed: %s" % ", ".join(agents))
-    print("live room wiring awaits kickoff SDK docs - see seam above")
-    sys.exit(1)  # not a fake green: live launch is not implemented yet
+    agents = [BandCellAgent(role) for role in LOOP_ROLES]
+    print("launching pod: %s" % ", ".join(LOOP_ROLES))
+    print("add all 4 agents to room '%s' on app.band.ai, then @gamer to kick off"
+          % args.room)
+    asyncio.run(_run_pod(agents))
 
 
 if __name__ == "__main__":

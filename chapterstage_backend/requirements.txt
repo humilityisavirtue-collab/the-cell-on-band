@@ -9,4 +9,8 @@ python-multipart>=0.0.9
 httpx>=0.27
 pytest>=8.0
 langgraph>=1.0
+openai>=1.40            # OpenAI-compatible client for the LLM seam (NVIDIA NIM)
+pypdf>=4.0             # PDF chapter extraction (/chapters/upload)
 # For the LIVE Band integration (M4), also: band-sdk[langgraph]
+# LLM seam: export CHAPTERSTAGE_LLM_PROVIDER=nim (key from apps/band/.env) to go live;
+# default is deterministic/offline so gates never touch the network.
