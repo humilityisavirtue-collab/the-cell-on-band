@@ -91,6 +91,30 @@ class JobStatusResponse(BaseModel):
     updated_at: datetime
 
 
+class TraceEventResponse(BaseModel):
+    id: str
+    agent_name: str
+    event_type: str
+    title: str
+    message: str
+    payload: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
+class JobTraceResponse(BaseModel):
+    job_id: str
+    band_room_id: Optional[str] = None
+    events: list[TraceEventResponse] = Field(default_factory=list)
+
+
+class ExperienceResponse(BaseModel):
+    experience_id: str
+    job_id: str
+    public_url: str
+    metadata: dict
+    created_at: datetime
+
+
 class ReaderProgressUpdate(BaseModel):
     current_screen_id: Optional[str] = None
     completed_screen_ids: list[str] = Field(default_factory=list)

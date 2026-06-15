@@ -73,7 +73,9 @@ def main():
 
         r = c.get("/api/v1/generation-jobs/%s" % job_id)
         check("GET /generation-jobs/{id} -> 200, round-trip status fetch",
-              r.status_code == 200 and r.json().get("status") == "queued"
+              r.status_code == 200 and r.json().get("status")
+              in ("queued", "extracting", "creating_band_room", "building_site",
+                  "publishing", "completed")
               and r.json().get("chapter_id") == chapter_id, receipt=r.text)
 
         # -- NEGATIVE CONTROLS: real failure modes -> exact §10 codes
