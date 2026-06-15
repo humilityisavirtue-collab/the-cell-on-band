@@ -3,8 +3,9 @@
 A generated experience is UNTRUSTED until this passes (handoff §11). It is the
 last line before a site is exposed at a public URL, so the checks are deny-by-
 evidence: required files present, metadata schema valid, and NO way for the site
-to reach the network or execute injected code (fetch/XHR/WebSocket/eval/Function/
-remote <script>/external <iframe>), references local assets only, has a viewport,
+to reach remote networks or execute injected code (remote URL literals, XHR/
+WebSocket/eval/Function/remote <script>/external <iframe>), references local assets
+only, has a viewport,
 and respects size caps (§7.5 MVP limits).
 
 validate_site(dir) -> {"passed": bool, "violations": [ {check, detail} ]}.
@@ -18,19 +19,26 @@ import json
 import re
 from pathlib import Path
 
-REQUIRED_FILES = ("index.html", "styles.css", "script.js", "metadata.json")
+REQUIRED_FILES = (
+    "index.html", "styles.css", "script.js", "metadata.json", "manifest.json")
+MANIFEST_KEYS = (
+    "experience_id", "job_id", "title", "screen_order", "initial_screen_id",
+    "components_used", "checkpoint_rules")
+SCREEN_KEYS = ("id", "title", "component_type", "content")
+_SCREEN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # The SECURITY BOUNDARY is a strict allowlist CSP (browser-enforced default-deny),
 # NOT the regex denylist below — a denylist loses to obfuscation (window['fet'+'ch'],
-# eval(atob(...))). connect-src 'none' kills ALL network egress regardless of how the
-# JS is spelled; script-src 'self' (no unsafe-inline/eval/remote) kills injected/eval'd
-# code. The server ALSO sends this CSP as a response header (main.py) so a page cannot
-# weaken it; the validator requires the page to DECLARE it too (safe if served anywhere).
+# eval(atob(...))). connect-src 'self' allows the modular shell to sync progress
+# with this backend while still killing remote egress; script-src 'self' (no
+# unsafe-inline/eval/remote) kills injected/eval'd code. The server ALSO sends this
+# CSP as a response header (main.py) so a page cannot weaken it; the validator
+# requires the page to DECLARE it too (safe if served anywhere).
 # Core directives that MUST be exactly these (the egress + code-exec boundary):
 REQUIRED_CSP = {
     "default-src": {"'none'"},
     "script-src": {"'self'"},
-    "connect-src": {"'none'"},
+    "connect-src": {"'self'"},
     "object-src": {"'none'"},
     "frame-src": {"'none'"},
     "base-uri": {"'none'"},
@@ -44,7 +52,7 @@ _FORBIDDEN_CSP_SRC = ("'unsafe-eval'", "'unsafe-inline'", "*", "http:", "https:"
 # is still bounded by img-src 'self' data:).
 STRICT_CSP_HEADER = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data:; font-src 'self' data:; connect-src 'none'; "
+    "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
     "frame-src 'none'; frame-ancestors 'none'; object-src 'none'; "
     "base-uri 'none'; form-action 'none'")
 
@@ -62,7 +70,6 @@ MAX_ASSETS_TOTAL = 5 * 1024 * 1024
 _FORBIDDEN = [
     ("remote_script", re.compile(r"<script[^>]+src\s*=\s*[\"']\s*https?:", re.I)),
     ("external_iframe", re.compile(r"<iframe[^>]+src\s*=\s*[\"']\s*https?:", re.I)),
-    ("fetch", re.compile(r"\bfetch\s*\(")),
     ("xhr", re.compile(r"\bXMLHttpRequest\b")),
     ("websocket", re.compile(r"\bWebSocket\s*\(")),
     ("eval", re.compile(r"\beval\s*\(")),
@@ -72,6 +79,7 @@ _FORBIDDEN = [
 
 # any external src/href (local-only rule). data: and # are fine.
 _EXTERNAL_REF = re.compile(r"(?:src|href)\s*=\s*[\"']\s*(https?:|//)", re.I)
+_REMOTE_URL_LITERAL = re.compile(r"(?:https?:|wss?:)?//", re.I)
 # local asset refs to existence-check
 _LOCAL_REF = re.compile(r"(?:src|href)\s*=\s*[\"']\s*(?!https?:|//|data:|#|mailto:)"
                         r"([^\"'?#]+)", re.I)
@@ -152,6 +160,22 @@ def validate_site(site_dir) -> dict:
         except Exception as e:
             add("metadata_invalid", type(e).__name__)
 
+    manifest = None
+    if "manifest.json" in present:
+        try:
+            manifest = json.loads(present["manifest.json"].read_text(
+                encoding="utf-8", errors="replace"))
+            missing = [k for k in MANIFEST_KEYS if k not in manifest]
+            if missing:
+                add("manifest_schema", "missing keys: %s" % ", ".join(missing))
+            order = manifest.get("screen_order")
+            if not isinstance(order, list) or not order:
+                add("manifest_schema", "screen_order must be a non-empty list")
+            elif manifest.get("initial_screen_id") not in order:
+                add("manifest_schema", "initial_screen_id not in screen_order")
+        except Exception as e:
+            add("manifest_invalid", type(e).__name__)
+
     # 3. size caps
     for fname, cap in MAX_BYTES.items():
         if fname in present and present[fname].stat().st_size > cap:
@@ -172,6 +196,8 @@ def validate_site(site_dir) -> dict:
     for name, rx in _FORBIDDEN:
         if rx.search(blob):
             add("forbidden_%s" % name, "matched %s" % rx.pattern)
+    if _REMOTE_URL_LITERAL.search(blob):
+        add("forbidden_remote_url", "html/css/js contains a remote URL literal")
 
     # 5. viewport + local-only refs + broken local assets (index.html)
     if "index.html" in present:
@@ -194,5 +220,31 @@ def validate_site(site_dir) -> dict:
                 continue
             if not target.is_file():
                 add("broken_asset", ref)
+
+    if manifest is not None:
+        screens = site / "screens"
+        if not screens.is_dir():
+            add("missing_screens_dir", "screens/")
+        else:
+            for screen_id in manifest.get("screen_order", []):
+                if not isinstance(screen_id, str) or not _SCREEN_ID.match(screen_id):
+                    add("screen_path", str(screen_id))
+                    continue
+                screen_file = screens / ("%s.json" % screen_id)
+                if not screen_file.is_file():
+                    add("screen_missing", str(screen_file.relative_to(site)))
+                    continue
+                try:
+                    screen = json.loads(screen_file.read_text(
+                        encoding="utf-8", errors="replace"))
+                except Exception as e:
+                    add("screen_invalid", "%s: %s" % (screen_id, type(e).__name__))
+                    continue
+                missing = [k for k in SCREEN_KEYS if k not in screen]
+                if missing:
+                    add("screen_schema", "%s missing %s" % (
+                        screen_id, ", ".join(missing)))
+                if screen.get("id") != screen_id:
+                    add("screen_schema", "%s id mismatch" % screen_id)
 
     return {"passed": len(violations) == 0, "violations": violations}

@@ -33,6 +33,11 @@ def check(name, cond, receipt=""):
 def main():
     print("test_auth_progress.py — account auth + reader progress")
     with TestClient(app) as c:
+        r = c.get("/api/v1/auth/me")
+        check("GET /auth/me before login -> AUTH_REQUIRED",
+              r.status_code == 401
+              and r.json()["error"]["code"] == "AUTH_REQUIRED", receipt=r.text)
+
         r = c.post("/api/v1/auth/register",
                    json={"email": "Reader@Example.com",
                          "password": "chapterstage-secret"})
@@ -50,9 +55,9 @@ def main():
               receipt=r.text)
 
         r = c.get("/api/v1/auth/me")
-        check("GET /auth/me without token -> AUTH_REQUIRED",
-              r.status_code == 401
-              and r.json()["error"]["code"] == "AUTH_REQUIRED", receipt=r.text)
+        check("GET /auth/me with auth cookie -> user",
+              r.status_code == 200 and r.json()["email"] == "reader@example.com",
+              receipt=r.text)
 
         headers = {"Authorization": "Bearer %s" % token}
         r = c.get("/api/v1/auth/me", headers=headers)
