@@ -3,10 +3,14 @@
 fastapi>=0.110
 sqlmodel>=0.0.14
 aiosqlite>=0.19
+greenlet>=3.0
 uvicorn[standard]>=0.27
 sse-starlette>=2.0
 python-multipart>=0.0.9
 httpx>=0.27
+pypdf>=4.0
+passlib[bcrypt]>=1.7
+python-jose[cryptography]>=3.3
 pytest>=8.0
 langgraph>=1.0
-# For the LIVE Band integration (M4), also: band-sdk[langgraph]
+# For live Band SDK mode, install requirements-live.txt.

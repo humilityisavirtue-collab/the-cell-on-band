@@ -27,7 +27,10 @@ class ChapterWorkflow:
     """Drives the artifact chain through band_service. Returns the final state;
     status == 'completed' ONLY if the module landed via a live room."""
 
-    def __init__(self, band_service):
+    def __init__(self, band_service=None):
+        if band_service is None:
+            from app.services.band_transport.factory import create_band_service
+            band_service = create_band_service()
         self.band = band_service
 
     def run(self, job_id: str, source_ref: str) -> dict:

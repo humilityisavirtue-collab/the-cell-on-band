@@ -19,13 +19,11 @@ class BandService:
     handoff so the gate can assert mechanically that routing went through here.
 
     M4 (the invariant milestone): an optional `transport` plugs the real Band
-    @mention path under handoff(). The production transport is
-    band_agent.BandTransport — its connect()/post() are the kickoff seam (raise
-    NotImplementedError until the band-sdk docs land), so this stays offline-
-    deterministic now and goes live unchanged at kickoff. The transport must
-    expose `.post(to_role, text) -> bool` and an `.alive` flag (sever == WS drop).
-    With no transport, the in-memory room is the deterministic offline twin used
-    by the load-bearing gate.
+    @mention path under handoff(). The transport is selectable: the test
+    transport is offline/deterministic, while the live transport wraps the Band
+    SDK. Both expose `.post(to_role, text) -> bool` and an `.alive` flag
+    (sever == WS drop). With no transport, the in-memory room is the smallest
+    deterministic twin used by older gates.
     """
 
     def __init__(self, transport=None):
@@ -39,7 +37,9 @@ class BandService:
     def open_room(self, job_id: str) -> str:
         self.room_id = "room-%s" % job_id
         if self.transport is not None and hasattr(self.transport, "open_room"):
-            self.transport.open_room(self.room_id)
+            remote_room_id = self.transport.open_room(self.room_id)
+            if isinstance(remote_room_id, str) and remote_room_id:
+                self.room_id = remote_room_id
         return self.room_id
 
     def recruit(self, role: str) -> None:
