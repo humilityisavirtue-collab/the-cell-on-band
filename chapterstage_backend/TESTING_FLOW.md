@@ -46,6 +46,7 @@ export DATABASE_URL=sqlite+aiosqlite:///./chapterstage_backend/chapterstage_flow
 export GENERATED_SITE_ROOT=./chapterstage_backend/static/generated
 export FLOW_DIR=./chapterstage_backend/.local/testing-flow
 export BAND_TRANSPORT_MODE=test
+export LOG_LEVEL=INFO
 mkdir -p "$FLOW_DIR"
 ```
 
@@ -324,6 +325,10 @@ PY
 
 Expected final status: `completed`, with `experience_id` and `public_url`.
 
+If the job fails, keep the printed JSON. The `error.message` now includes the
+failing workflow stage and, for invalid provider JSON, a short provider response
+preview.
+
 Extract them for later steps:
 
 ```bash
@@ -364,6 +369,10 @@ if (body.experience_id) pm.environment.set("experience_id", body.experience_id);
 if (body.public_url) pm.environment.set("public_url", body.public_url);
 ```
 
+If the response has `status: "failed_agent_workflow"`, immediately run the trace
+request in the next section. It will include `workflow_error` details even when
+the failure happened before the first successful Band handoff.
+
 ## 7. Inspect Events, Trace, And Recent Jobs
 
 ### Curl: Replay SSE Events
@@ -397,7 +406,9 @@ curl -sS "$BASE/generation-jobs/$JOB_ID/trace" | python -m json.tool
 Expected shape:
 
 - `band_room_id` is present in test mode
-- `events` contains four Band handoff events
+- successful jobs contain four Band handoff events
+- failed jobs contain a `workflow_error` event with `error_stage`, `error_type`,
+  and the provider error message
 
 In Postman:
 

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections import defaultdict
 from datetime import datetime
 
 TERMINAL_EVENTS = {"experience_ready", "job_failed"}
+logger = logging.getLogger(__name__)
 
 _events: dict[str, list[dict]] = defaultdict(list)
 _conditions: dict[str, asyncio.Condition] = {}
@@ -27,6 +29,7 @@ async def publish(job_id: str, event: str, data: dict) -> None:
     async with cond:
         _events[job_id].append(record)
         cond.notify_all()
+    logger.info("sse event published job_id=%s event=%s", job_id, event)
 
 
 async def stream(job_id: str):

@@ -7,6 +7,7 @@ fetchable, which is what the frontend polls.
 """
 from __future__ import annotations
 
+import logging
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -20,6 +21,8 @@ from app.models import (AgentTraceEvent, Book, Chapter, Experience, GenerationJo
 from app.schemas import ChapterTextRequest, JobCreateRequest
 from app.services import sse_bus
 from app.services.site_storage import write_modular_site
+
+logger = logging.getLogger(__name__)
 
 
 async def create_chapter_from_text(
@@ -68,6 +71,10 @@ async def create_job(session: AsyncSession, req: JobCreateRequest) -> Generation
     session.add(job)
     await session.commit()
     await session.refresh(job)
+    logger.info(
+        "generation job queued job_id=%s chapter_id=%s audience=%s style=%s screens=%s",
+        job.id, job.chapter_id, job.audience_level, job.experience_style,
+        job.target_screen_count)
     return job
 
 
@@ -102,6 +109,8 @@ async def run_generation_job(job_id: str) -> None:
                             "Chapter source is missing.")
             return
         try:
+            logger.info("generation job started job_id=%s chapter_id=%s",
+                        job.id, job.chapter_id)
             await _set_job(session, job, "extracting", 0.10,
                            "Preparing chapter text.")
             await _set_job(session, job, "creating_band_room", 0.18,
@@ -118,8 +127,9 @@ async def run_generation_job(job_id: str) -> None:
             await _trace_handoffs(session, job, band)
 
             if state.get("status") != "completed":
-                await _fail_job(session, job, "AGENT_WORKFLOW_FAILED",
-                                "Agent workflow stalled before completion.")
+                await _trace_workflow_failure(session, job, state)
+                message = _workflow_failure_message(state)
+                await _fail_job(session, job, "AGENT_WORKFLOW_FAILED", message)
                 return
 
             await _set_job(session, job, "building_site", 0.72,
@@ -165,7 +175,10 @@ async def run_generation_job(job_id: str) -> None:
                 "experience_id": experience_id,
                 "public_url": public_url,
             })
+            logger.info("generation job completed job_id=%s experience_id=%s",
+                        job.id, experience_id)
         except Exception as exc:
+            logger.exception("generation job failed job_id=%s", job.id)
             await _fail_job(session, job, "AGENT_WORKFLOW_FAILED", str(exc))
 
 
@@ -178,6 +191,8 @@ async def _set_job(
     job.updated_at = _now()
     session.add(job)
     await session.commit()
+    logger.info("generation job progress job_id=%s status=%s progress=%.2f step=%s",
+                job.id, status, progress, step)
     await sse_bus.publish(job.id, "job_progress", {
         "status": status,
         "progress": progress,
@@ -195,6 +210,8 @@ async def _fail_job(
     job.updated_at = _now()
     session.add(job)
     await session.commit()
+    logger.error("generation job failed job_id=%s code=%s message=%s",
+                 job.id, code, message)
     await sse_bus.publish(job.id, "job_failed", {
         "status": job.status,
         "progress": job.progress,
@@ -222,6 +239,47 @@ async def _trace_handoffs(
             "message": event.message,
         })
     await session.commit()
+
+
+async def _trace_workflow_failure(
+        session: AsyncSession, job: GenerationJob, state: dict) -> None:
+    log_entries = state.get("log") or ["workflow"]
+    stage = state.get("error_stage") or log_entries[-1]
+    message = _workflow_failure_message(state)
+    event = AgentTraceEvent(
+        job_id=job.id,
+        band_room_id=job.band_room_id,
+        agent_name=str(stage or "workflow"),
+        event_type="workflow_error",
+        title="Workflow failed at %s" % (stage or "unknown stage"),
+        message=message,
+        payload={
+            "status": state.get("status"),
+            "error_stage": state.get("error_stage"),
+            "error_type": state.get("error_type"),
+            "error": state.get("error"),
+            "log": state.get("log", []),
+        },
+    )
+    session.add(event)
+    await session.commit()
+    await sse_bus.publish(job.id, "agent_error", {
+        "agent_name": event.agent_name,
+        "title": event.title,
+        "message": event.message,
+        "payload": event.payload,
+    })
+
+
+def _workflow_failure_message(state: dict) -> str:
+    if state.get("error"):
+        stage = state.get("error_stage")
+        if stage:
+            return "%s failed: %s" % (stage, state["error"])
+        return str(state["error"])
+    if state.get("status") == "stalled":
+        return "Agent workflow stalled before completion."
+    return "Agent workflow failed before completion."
 
 
 def _screens_for_chapter(chapter: Chapter, state: dict) -> list[dict]:

@@ -47,4 +47,7 @@ class JsonMixin:
         try:
             return json.loads(text)
         except json.JSONDecodeError as exc:
-            raise LLMProviderError("Provider returned invalid JSON.") from exc
+            preview = " ".join((text or "").split())[:500]
+            detail = " Preview: %r" % preview if preview else ""
+            raise LLMProviderError(
+                "Provider returned invalid JSON.%s" % detail) from exc

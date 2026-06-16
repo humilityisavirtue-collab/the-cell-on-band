@@ -101,6 +101,7 @@ class Settings:
         self.FEATHERLESS_BASE_URL: str = os.environ.get(
             "FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1")
 
+        self.LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
         self.VERSION: str = "0.1.0"
 
 

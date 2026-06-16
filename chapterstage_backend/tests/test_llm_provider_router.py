@@ -8,7 +8,7 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_BACKEND))
 
-from app.services.llm.base import LLMProviderError  # noqa: E402
+from app.services.llm.base import JsonMixin, LLMProviderError  # noqa: E402
 from app.services.llm.router import create_provider, select_provider_config  # noqa: E402
 
 FAILURES: list[str] = []
@@ -29,6 +29,15 @@ def clear_env():
         if key.startswith(("OLLAMA_", "OPENAI_", "ANTHROPIC_", "FEATHERLESS_")) \
                 or key == "LLM_PROVIDER":
             os.environ.pop(key)
+
+
+class BadJsonProvider(JsonMixin):
+    name = "bad-json"
+    model = "bad-json"
+
+    def generate_text(self, messages, model=None, temperature=None,
+                      json_schema=None):
+        return "I am prose, not JSON."
 
 
 def main():
@@ -78,6 +87,14 @@ def main():
     except LLMProviderError as exc:
         failed = "missing required env values" in str(exc)
     check("explicit provider fails fast when env is incomplete", failed)
+
+    failed = False
+    try:
+        BadJsonProvider().generate_json([], {})
+    except LLMProviderError as exc:
+        failed = ("Provider returned invalid JSON" in str(exc)
+                  and "I am prose, not JSON." in str(exc))
+    check("invalid provider JSON error includes response preview", failed)
 
     print("%d/%d gate checks passed" % (len(RAN) - len(FAILURES), len(RAN)))
     if FAILURES:

@@ -12,6 +12,7 @@ the orchestration logic here does not change.
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -21,6 +22,8 @@ import chapter_nodes as nodes  # noqa: E402  (STAGES + per-agent nodes)
 _BAND = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_BAND))
 import chapterstage_envelopes as cse  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 class ChapterWorkflow:
@@ -43,7 +46,16 @@ class ChapterWorkflow:
                        "status": "running", "log": []}
 
         for role, slot, node_fn, to_role in nodes.STAGES:
-            env = node_fn(state)                 # the agent's own graph runs + emits
+            try:
+                env = node_fn(state)             # the agent's own graph runs + emits
+            except Exception as exc:
+                logger.exception("chapter agent failed role=%s job_id=%s",
+                                 role, job_id)
+                state["status"] = "failed"
+                state["error_stage"] = role
+                state["error_type"] = exc.__class__.__name__
+                state["error"] = str(exc)
+                return state
             problems = cse.validate(env)         # node output validated by the contract
             if problems:
                 state["status"] = "failed"
