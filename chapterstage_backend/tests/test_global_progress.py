@@ -13,6 +13,9 @@ _TMP = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///%s/test.db" % _TMP.name
 os.environ["GENERATED_SITE_ROOT"] = _TMP.name + "/static"
 os.environ["BAND_TRANSPORT_MODE"] = "test"
+os.environ["CHAPTERSTAGE_ENV_FILE"] = _TMP.name + "/missing.env"
+for _key in ("LLM_PROVIDER", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
+    os.environ.pop(_key, None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
