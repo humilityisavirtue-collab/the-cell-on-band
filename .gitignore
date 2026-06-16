@@ -20,3 +20,5 @@ __pycache__/
 *.db
 chapterstage_backend/static/
 chapterstage_backend/.venv/
+chapterstage_backend/.local/
+static/

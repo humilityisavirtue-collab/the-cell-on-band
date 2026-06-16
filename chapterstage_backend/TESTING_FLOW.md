@@ -1,223 +1,215 @@
-# ChapterStage Full Flow Testing Guide
+# ChapterStage Testing Flow
 
-This guide simulates the whole ChapterStage backend flow locally with either
-`curl` or Postman:
+This guide shows the normal local test flow first: one CLI command against an
+already-running FastAPI server. Curl and Postman are still included for manual
+debugging, but they should not be the daily happy path anymore.
 
-1. create a chapter
-2. start a generation job
-3. watch job progress
-4. verify Band handoff trace events
-5. publish a modular generated site
-6. open the public experience
-7. persist and resume anonymous global progress
+The flow covers:
 
-The default path is offline and deterministic. It uses `BAND_TRANSPORT_MODE=test`
-and does not call the real Band SDK or any remote LLM provider.
+- create a chapter from `examples/kids_story_payload.json`
+- start a generation job
+- poll until completion or agent failure
+- save job status, trace, and SSE artifacts
+- verify the generated public experience returns HTML
+- save and read back anonymous global progress
 
-If you use Postman, it helps to create an environment with these variables up
-front:
+All generated test artifacts stay inside the repo under
+`chapterstage_backend/.local/testing-flow/`.
 
-- `base_url = http://127.0.0.1:8000/api/v1`
-- `public_base = http://127.0.0.1:8000/public/experiences`
-- `chapter_id =`
-- `job_id =`
-- `experience_id =`
-- `public_url =`
+## 1. Prepare Local Environment
 
-## 1. Prepare The Environment
-
-Run these commands from the repository root:
+From the repository root:
 
 ```bash
 python3 -m venv venv
-source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r chapterstage_backend/requirements.txt
+./venv/bin/python -m pip install --upgrade pip
+./venv/bin/python -m pip install -r chapterstage_backend/requirements.txt
 ```
 
-Use a local SQLite database, a repo-local scratch directory, and a generated-site
-directory for this simulation:
+The backend and flow runner both load `chapterstage_backend/.env`
+automatically. You do not need to export environment variables for the normal
+flow.
 
-```bash
-export APP_ENV=development
-export API_BASE_URL=http://127.0.0.1:8000
-export PUBLIC_SITE_BASE_URL=http://127.0.0.1:8000/public/experiences
-export DATABASE_URL=sqlite+aiosqlite:///./chapterstage_backend/chapterstage_flow.db
-export GENERATED_SITE_ROOT=./chapterstage_backend/static/generated
-export FLOW_DIR=./chapterstage_backend/.local/testing-flow
-export BAND_TRANSPORT_MODE=test
-export LOG_LEVEL=INFO
-mkdir -p "$FLOW_DIR"
+Recommended `.env` values for local test mode:
+
+```dotenv
+APP_ENV=development
+API_BASE_URL=http://127.0.0.1:8000
+PUBLIC_SITE_BASE_URL=http://127.0.0.1:8000/public/experiences
+DATABASE_URL=sqlite+aiosqlite:///./chapterstage_backend/chapterstage_flow.db
+GENERATED_SITE_ROOT=./chapterstage_backend/static/generated
+BAND_TRANSPORT_MODE=test
+LOG_LEVEL=INFO
+
+# Ollama-first provider mode.
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
 ```
 
-For a fully deterministic offline run, clear provider env vars so the agents use
-their built-in fallback logic:
+Adjust `OLLAMA_MODEL` to the exact name shown by:
 
 ```bash
-unset OLLAMA_MODEL
-unset OPENAI_API_KEY OPENAI_MODEL
-unset ANTHROPIC_API_KEY ANTHROPIC_MODEL
-unset FEATHERLESS_API_KEY FEATHERLESS_MODEL
-export LLM_PROVIDER=auto
+ollama list
 ```
 
-Optional Ollama mode:
+If you are using the Ollama macOS app, confirm the local API is available:
 
 ```bash
-# Run this in another terminal if Ollama is not already serving.
-ollama serve
+curl -sS http://localhost:11434/api/tags | ./venv/bin/python -m json.tool
 ```
 
-Then, in the backend terminal:
+## 2. Start The API Server
+
+Run this from the repository root and leave it running:
 
 ```bash
-ollama pull llama3.1
-export LLM_PROVIDER=ollama
-export OLLAMA_BASE_URL=http://localhost:11434
-export OLLAMA_MODEL=llama3.1
-```
-
-Only enable Ollama if the local Ollama server is running. Otherwise generation
-will fail when an agent tries to call the provider.
-
-## 2. Run The Offline Gates
-
-These tests use temp databases/directories and should not touch the local
-simulation database above.
-
-```bash
-set -e
-python chapterstage_backend/tests/test_api_jobs.py
-python chapterstage_backend/tests/test_global_progress.py
-python chapterstage_backend/tests/test_job_execution.py
-python chapterstage_backend/tests/test_site_storage.py
-python chapterstage_backend/tests/test_site_validator.py
-python chapterstage_backend/tests/test_public_csp.py
-python chapterstage_backend/tests/test_band_transport_factory.py
-python chapterstage_backend/tests/test_chapter_graph.py
-python chapterstage_backend/tests/test_m4_band_loadbearing.py
-python chapterstage_backend/tests/test_llm_provider_router.py
-python chapterstage_backend/tests/test_chapter_agents.py
-```
-
-Expected result: every script exits with `GATE PASS`.
-
-## 3. Start The API Server
-
-Keep the env vars from step 1 in the same shell, then start FastAPI:
-
-```bash
-uvicorn app.main:app \
+./venv/bin/uvicorn app.main:app \
   --app-dir chapterstage_backend \
   --host 127.0.0.1 \
   --port 8000 \
   --reload
 ```
 
-Open a second terminal for the remaining commands and export the same key vars:
+The flow runner does not start or stop uvicorn. If the server is down, it fails
+at `GET /health` before creating any chapter.
+
+## 3. Run The Full Flow With One Command
+
+In a second terminal, from the repository root:
+
+```bash
+./venv/bin/python chapterstage_backend/scripts/run_flow.py
+```
+
+Defaults:
+
+- API base URL: `API_BASE_URL` from `.env`, falling back to
+  `http://127.0.0.1:8000/api/v1`
+- payload: `chapterstage_backend/examples/kids_story_payload.json`
+- artifacts: `chapterstage_backend/.local/testing-flow/latest/`
+- timeout: `60` seconds
+- poll interval: `0.5` seconds
+
+Useful overrides:
+
+```bash
+./venv/bin/python chapterstage_backend/scripts/run_flow.py \
+  --timeout-seconds 120 \
+  --poll-interval 1
+```
+
+```bash
+./venv/bin/python chapterstage_backend/scripts/run_flow.py \
+  --base-url http://127.0.0.1:8000 \
+  --payload chapterstage_backend/examples/kids_story_payload.json \
+  --out-dir chapterstage_backend/.local/testing-flow/qwen-run \
+  --open
+```
+
+Successful output ends with:
+
+```text
+PASS completed
+experience_id=...
+public_url=http://127.0.0.1:8000/public/experiences/.../index.html
+```
+
+The runner writes these artifacts on a normal completed or failed job:
+
+- `chapter_response.json`
+- `job_response.json`
+- `job_status_history.json`
+- `job_status_final.json`
+- `trace.json`
+- `events.sse`
+
+On success it also writes:
+
+- `experience_response.json`
+- `progress_initial.json`
+- `progress_saved.json`
+- `progress_final.json`
+
+## 4. Inspect Failed Runs
+
+If the runner exits nonzero, start here:
+
+```bash
+./venv/bin/python -m json.tool \
+  < chapterstage_backend/.local/testing-flow/latest/job_status_final.json
+```
+
+```bash
+./venv/bin/python -m json.tool \
+  < chapterstage_backend/.local/testing-flow/latest/trace.json
+```
+
+```bash
+sed -n '1,160p' chapterstage_backend/.local/testing-flow/latest/events.sse
+```
+
+For provider issues, `job_status_final.json` should include `error.message`.
+For workflow issues, `trace.json` should include a `workflow_error` event with
+the failing stage and provider error preview when available.
+
+## 5. Run Offline Gates
+
+These tests use fake clients, temp databases, or deterministic test transports.
+They do not require Ollama or live Band credentials.
+
+```bash
+set -e
+./venv/bin/python chapterstage_backend/tests/test_run_flow_script.py
+./venv/bin/python chapterstage_backend/tests/test_job_execution.py
+./venv/bin/python chapterstage_backend/tests/test_job_failure_diagnostics.py
+./venv/bin/python chapterstage_backend/tests/test_global_progress.py
+./venv/bin/python chapterstage_backend/tests/test_api_jobs.py
+```
+
+Expected result: every script exits with `GATE PASS`.
+
+## 6. Manual Debugging With Curl
+
+Use this section when you want to inspect one API call at a time. These commands
+also write artifacts under `chapterstage_backend/.local/testing-flow/manual/`.
 
 ```bash
 export BASE=http://127.0.0.1:8000/api/v1
-export PUBLIC_BASE=http://127.0.0.1:8000/public/experiences
-export FLOW_DIR=./chapterstage_backend/.local/testing-flow
+export FLOW_DIR=chapterstage_backend/.local/testing-flow/manual
 mkdir -p "$FLOW_DIR"
 ```
 
-### Curl: Check Health
+Health:
 
 ```bash
-curl -sS "$BASE/health" | python -m json.tool
+curl -sS "$BASE/health" | ./venv/bin/python -m json.tool
 ```
 
-Expected response:
-
-```json
-{
-  "status": "ok",
-  "version": "0.1.0"
-}
-```
-
-### Postman: Check Health
-
-Create a request:
-
-- Method: `GET`
-- URL: `http://127.0.0.1:8000/api/v1/health`
-
-Expected response body:
-
-```json
-{
-  "status": "ok",
-  "version": "0.1.0"
-}
-```
-
-## 4. Create A Chapter
-
-Use the sample payload file already stored in the repo:
-
-```bash
-chapterstage_backend/examples/kids_story_payload.json
-```
-
-This file already matches `POST /api/v1/chapters/text` and is long enough to
-pass the chapter length validator.
-
-### Curl: Create Chapter
+Create a chapter:
 
 ```bash
 curl -sS -X POST "$BASE/chapters/text" \
   -H "Content-Type: application/json" \
   --data @chapterstage_backend/examples/kids_story_payload.json \
   | tee "$FLOW_DIR/chapter_response.json" \
-  | python -m json.tool
+  | ./venv/bin/python -m json.tool
 ```
-
-Save the returned id:
 
 ```bash
 export CHAPTER_ID="$(
-  python - <<'PY'
+  ./venv/bin/python - <<'PY'
 import json
-print(json.load(open("chapterstage_backend/.local/testing-flow/chapter_response.json"))["chapter_id"])
+from pathlib import Path
+print(json.loads(Path("chapterstage_backend/.local/testing-flow/manual/chapter_response.json").read_text())["chapter_id"])
 PY
 )"
-echo "$CHAPTER_ID"
 ```
 
-### Postman: Create Chapter
-
-Create a request:
-
-- Method: `POST`
-- URL: `http://127.0.0.1:8000/api/v1/chapters/text`
-- Headers:
-  - `Content-Type: application/json`
-- Body:
-  - Choose `raw`
-  - Select `JSON`
-  - Paste the contents of [kids_story_payload.json](/Users/zeeshanali/Documents/Hackathons/Band%20Of%20Agents/backend/the-cell-on-band/chapterstage_backend/examples/kids_story_payload.json)
-
-Expected response:
-
-- Status code: `201`
-- JSON contains `chapter_id`, `book_id`, `title`, and `source_type: "text"`
-
-If you want Postman to save the id for later requests, add this test script:
-
-```javascript
-const body = pm.response.json();
-pm.environment.set("chapter_id", body.chapter_id);
-```
-
-## 5. Start A Generation Job
-
-Create and submit the job payload:
+Start a generation job:
 
 ```bash
-python - <<'PY'
+./venv/bin/python - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -226,77 +218,35 @@ payload = {
     "chapter_id": os.environ["CHAPTER_ID"],
     "audience_level": "beginner",
     "experience_style": "visual_story",
-    "target_screen_count": 3,
-    "enable_auto_brainstorm": True,
 }
-Path("chapterstage_backend/.local/testing-flow/job_payload.json").write_text(
-    json.dumps(payload)
+Path("chapterstage_backend/.local/testing-flow/manual/job_payload.json").write_text(
+    json.dumps(payload, indent=2)
 )
 PY
 ```
-
-### Curl: Start Job
 
 ```bash
 curl -sS -X POST "$BASE/generation-jobs" \
   -H "Content-Type: application/json" \
   --data @"$FLOW_DIR/job_payload.json" \
   | tee "$FLOW_DIR/job_response.json" \
-  | python -m json.tool
+  | ./venv/bin/python -m json.tool
 ```
-
-Save the job id:
 
 ```bash
 export JOB_ID="$(
-  python - <<'PY'
+  ./venv/bin/python - <<'PY'
 import json
-print(json.load(open("chapterstage_backend/.local/testing-flow/job_response.json"))["job_id"])
+from pathlib import Path
+print(json.loads(Path("chapterstage_backend/.local/testing-flow/manual/job_response.json").read_text())["job_id"])
 PY
 )"
-echo "$JOB_ID"
 ```
 
-### Postman: Start Job
-
-Create a request:
-
-- Method: `POST`
-- URL: `http://127.0.0.1:8000/api/v1/generation-jobs`
-- Headers:
-  - `Content-Type: application/json`
-- Body:
-
-```json
-{
-  "chapter_id": "{{chapter_id}}",
-  "audience_level": "beginner",
-  "experience_style": "visual_story",
-  "target_screen_count": 3,
-  "enable_auto_brainstorm": true
-}
-```
-
-Expected response:
-
-- Status code: `202`
-- JSON contains `job_id`, `status`, `status_url`, and `events_url`
-
-Optional Postman test script:
-
-```javascript
-const body = pm.response.json();
-pm.environment.set("job_id", body.job_id);
-pm.environment.set("job_status_url", body.status_url);
-pm.environment.set("job_events_url", body.events_url);
-```
-
-## 6. Poll Until The Job Completes
-
-### Curl: Poll Job Status
+Poll status:
 
 ```bash
-python - <<'PY'
+./venv/bin/python - <<'PY'
 import json
 import os
 import time
@@ -305,16 +255,20 @@ from pathlib import Path
 
 base = os.environ["BASE"]
 job_id = os.environ["JOB_ID"]
-status_path = Path("chapterstage_backend/.local/testing-flow/job_status.json")
+history_path = Path("chapterstage_backend/.local/testing-flow/manual/job_status_history.json")
+final_path = Path("chapterstage_backend/.local/testing-flow/manual/job_status_final.json")
+history = []
 
-for _ in range(30):
+for _ in range(120):
     with urllib.request.urlopen(f"{base}/generation-jobs/{job_id}") as response:
         payload = json.loads(response.read().decode("utf-8"))
-    status_path.write_text(json.dumps(payload, indent=2))
+    history.append(payload)
+    history_path.write_text(json.dumps(history, indent=2))
+    final_path.write_text(json.dumps(payload, indent=2))
     print(payload["status"], payload["progress"], payload.get("current_step"))
     if payload["status"] in {"completed", "failed_agent_workflow"}:
         break
-    time.sleep(0.25)
+    time.sleep(0.5)
 else:
     raise SystemExit("job did not finish in time")
 
@@ -323,172 +277,57 @@ if payload["status"] != "completed":
 PY
 ```
 
-Expected final status: `completed`, with `experience_id` and `public_url`.
+Fetch trace and SSE events:
 
-If the job fails, keep the printed JSON. The `error.message` now includes the
-failing workflow stage and, for invalid provider JSON, a short provider response
-preview.
+```bash
+curl -sS "$BASE/generation-jobs/$JOB_ID/trace" \
+  | tee "$FLOW_DIR/trace.json" \
+  | ./venv/bin/python -m json.tool
+```
 
-Extract them for later steps:
+```bash
+curl --max-time 10 -N "$BASE/generation-jobs/$JOB_ID/events" \
+  | tee "$FLOW_DIR/events.sse"
+```
+
+Extract the generated experience ids:
 
 ```bash
 export EXPERIENCE_ID="$(
-  python - <<'PY'
+  ./venv/bin/python - <<'PY'
 import json
-print(json.load(open("chapterstage_backend/.local/testing-flow/job_status.json"))["experience_id"])
+from pathlib import Path
+print(json.loads(Path("chapterstage_backend/.local/testing-flow/manual/job_status_final.json").read_text())["experience_id"])
 PY
 )"
 export PUBLIC_URL="$(
-  python - <<'PY'
+  ./venv/bin/python - <<'PY'
 import json
-print(json.load(open("chapterstage_backend/.local/testing-flow/job_status.json"))["public_url"])
+from pathlib import Path
+print(json.loads(Path("chapterstage_backend/.local/testing-flow/manual/job_status_final.json").read_text())["public_url"])
 PY
 )"
-echo "$EXPERIENCE_ID"
-echo "$PUBLIC_URL"
 ```
 
-### Postman: Poll Job Status
-
-Create a request:
-
-- Method: `GET`
-- URL: `http://127.0.0.1:8000/api/v1/generation-jobs/{{job_id}}`
-
-Send the request repeatedly until the JSON shows:
-
-- `status: "completed"`
-- a non-empty `experience_id`
-- a non-empty `public_url`
-
-Optional Postman test script:
-
-```javascript
-const body = pm.response.json();
-if (body.experience_id) pm.environment.set("experience_id", body.experience_id);
-if (body.public_url) pm.environment.set("public_url", body.public_url);
-```
-
-If the response has `status: "failed_agent_workflow"`, immediately run the trace
-request in the next section. It will include `workflow_error` details even when
-the failure happened before the first successful Band handoff.
-
-## 7. Inspect Events, Trace, And Recent Jobs
-
-### Curl: Replay SSE Events
+Verify metadata and public HTML:
 
 ```bash
-curl --max-time 5 -N "$BASE/generation-jobs/$JOB_ID/events"
+curl -sS "$BASE/experiences/$EXPERIENCE_ID" \
+  | tee "$FLOW_DIR/experience_response.json" \
+  | ./venv/bin/python -m json.tool
 ```
-
-Expected event names include:
-
-- `job_progress`
-- `agent_message`
-- `experience_ready`
-
-### Postman: SSE Events
-
-If your Postman build supports streaming response viewing, create a `GET` request
-to:
-
-- `http://127.0.0.1:8000/api/v1/generation-jobs/{{job_id}}/events`
-
-If your Postman build does not display Server-Sent Events cleanly, use the `curl`
-command above for this step.
-
-### Curl Or Postman: Agent Trace
 
 ```bash
-curl -sS "$BASE/generation-jobs/$JOB_ID/trace" | python -m json.tool
+curl -sS "$PUBLIC_URL" | sed -n '1,40p'
 ```
 
-Expected shape:
-
-- `band_room_id` is present in test mode
-- successful jobs contain four Band handoff events
-- failed jobs contain a `workflow_error` event with `error_stage`, `error_type`,
-  and the provider error message
-
-In Postman:
-
-- Method: `GET`
-- URL: `http://127.0.0.1:8000/api/v1/generation-jobs/{{job_id}}/trace`
-
-### Curl Or Postman: Recent Jobs
+Test anonymous global progress:
 
 ```bash
-curl -sS "$BASE/generation-jobs?limit=5&offset=0" | python -m json.tool
+curl -sS "$BASE/experiences/$EXPERIENCE_ID/progress" \
+  | tee "$FLOW_DIR/progress_initial.json" \
+  | ./venv/bin/python -m json.tool
 ```
-
-Expected result: the current `JOB_ID` appears in `jobs`.
-
-In Postman:
-
-- Method: `GET`
-- URL: `http://127.0.0.1:8000/api/v1/generation-jobs?limit=5&offset=0`
-
-## 8. Inspect The Published Experience
-
-### Curl: Fetch Experience Metadata
-
-```bash
-curl -sS "$BASE/experiences/$EXPERIENCE_ID" | python -m json.tool
-```
-
-### Postman: Fetch Experience Metadata
-
-Create a request:
-
-- Method: `GET`
-- URL: `http://127.0.0.1:8000/api/v1/experiences/{{experience_id}}`
-
-Inspect the generated files:
-
-```bash
-find "chapterstage_backend/static/generated/$EXPERIENCE_ID" -maxdepth 2 -type f | sort
-python -m json.tool < "chapterstage_backend/static/generated/$EXPERIENCE_ID/manifest.json"
-python -m json.tool < "chapterstage_backend/static/generated/$EXPERIENCE_ID/metadata.json"
-```
-
-Expected files:
-
-- `index.html`
-- `styles.css`
-- `script.js`
-- `manifest.json`
-- `metadata.json`
-- `screens/intro.json`
-- `screens/map.json`
-- `screens/recap.json`
-
-Open the public site:
-
-```bash
-open "$PUBLIC_URL"
-```
-
-On Linux, use `xdg-open "$PUBLIC_URL"` instead.
-
-## 9. Simulate Anonymous Global Progress
-
-Progress is intentionally not tied to a user, cookie, or bearer token. The backend
-stores one global progress row per experience.
-
-### Curl: Read Initial Progress
-
-```bash
-curl -sS "$BASE/experiences/$EXPERIENCE_ID/progress" | python -m json.tool
-```
-
-### Postman: Read Initial Progress
-
-Create a request:
-
-- Method: `GET`
-- URL: `http://127.0.0.1:8000/api/v1/experiences/{{experience_id}}/progress`
-
-### Curl: Save A Checkpoint
 
 ```bash
 curl -sS -X PUT "$BASE/experiences/$EXPERIENCE_ID/progress" \
@@ -499,107 +338,103 @@ curl -sS -X PUT "$BASE/experiences/$EXPERIENCE_ID/progress" \
     "last_checkpoint": "map",
     "interaction_state": {"demo": "manual checkpoint"}
   }' \
-  | python -m json.tool
+  | tee "$FLOW_DIR/progress_saved.json" \
+  | ./venv/bin/python -m json.tool
 ```
 
-### Postman: Save A Checkpoint
+```bash
+curl -sS "$BASE/experiences/$EXPERIENCE_ID/progress" \
+  | tee "$FLOW_DIR/progress_final.json" \
+  | ./venv/bin/python -m json.tool
+```
 
-Create a request:
+## 7. Manual Debugging With Postman
 
-- Method: `PUT`
-- URL: `http://127.0.0.1:8000/api/v1/experiences/{{experience_id}}/progress`
-- Headers:
-  - `Content-Type: application/json`
-- Body:
+Create a Postman environment with:
+
+- `base_url`: `http://127.0.0.1:8000/api/v1`
+- `chapter_id`: blank initially
+- `job_id`: blank initially
+- `experience_id`: blank initially
+- `public_url`: blank initially
+
+Requests:
+
+- Health: `GET {{base_url}}/health`
+- Create chapter: `POST {{base_url}}/chapters/text`
+  - Header: `Content-Type: application/json`
+  - Body: raw JSON copied from `chapterstage_backend/examples/kids_story_payload.json`
+  - Test script: `pm.environment.set("chapter_id", pm.response.json().chapter_id);`
+- Start job: `POST {{base_url}}/generation-jobs`
+  - Header: `Content-Type: application/json`
+  - Body:
+
+```json
+{
+  "chapter_id": "{{chapter_id}}",
+  "audience_level": "beginner",
+  "experience_style": "visual_story"
+}
+```
+
+  - Test script: `pm.environment.set("job_id", pm.response.json().job_id);`
+- Poll status: `GET {{base_url}}/generation-jobs/{{job_id}}`
+  - Send repeatedly until `status` is `completed` or `failed_agent_workflow`
+  - Test script:
+
+```javascript
+const body = pm.response.json();
+if (body.experience_id) pm.environment.set("experience_id", body.experience_id);
+if (body.public_url) pm.environment.set("public_url", body.public_url);
+```
+
+- Trace: `GET {{base_url}}/generation-jobs/{{job_id}}/trace`
+- Events: `GET {{base_url}}/generation-jobs/{{job_id}}/events`
+  - If Postman does not display SSE cleanly, use the curl event command above.
+- Experience metadata: `GET {{base_url}}/experiences/{{experience_id}}`
+- Progress read: `GET {{base_url}}/experiences/{{experience_id}}/progress`
+- Progress save: `PUT {{base_url}}/experiences/{{experience_id}}/progress`
+  - Header: `Content-Type: application/json`
+  - Body:
 
 ```json
 {
   "current_screen_id": "map",
   "completed_screen_ids": ["intro", "map"],
   "last_checkpoint": "map",
-  "interaction_state": {"demo": "manual checkpoint"}
+  "interaction_state": {"demo": "postman checkpoint"}
 }
 ```
 
-### Curl Or Postman: Read It Back
-
-```bash
-curl -sS "$BASE/experiences/$EXPERIENCE_ID/progress" | python -m json.tool
-```
-
-Restart the server and run the same `GET` again. Because the simulation uses a
-file-backed SQLite database, the saved checkpoint should still be there.
-
-## 10. Simulate Failure Paths
-
-### Curl Or Postman: Bad Chapter Text
-
-```bash
-curl -sS -X POST "$BASE/chapters/text" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"too short"}' \
-  | python -m json.tool
-```
-
-Expected error code: `CHAPTER_TOO_SHORT`.
-
-In Postman:
-
-- Method: `POST`
-- URL: `http://127.0.0.1:8000/api/v1/chapters/text`
-- Headers:
-  - `Content-Type: application/json`
-- Body:
-
-```json
-{
-  "text": "too short"
-}
-```
-
-### Curl Or Postman: Unknown Job
-
-```bash
-curl -sS "$BASE/generation-jobs/no-such-job" | python -m json.tool
-```
-
-Expected error code: `JOB_NOT_FOUND`.
-
-Band sever/load-bearing checks:
-
-```bash
-python chapterstage_backend/tests/test_band_transport_factory.py
-python chapterstage_backend/tests/test_m4_band_loadbearing.py
-```
-
-Expected result: severing the Band transport stalls the workflow and prevents a
-completed module/public URL.
-
-## 11. Optional Live Band Transport
+## 8. Optional Live Band Transport
 
 Only use this when you want real Band SDK calls.
 
 ```bash
-python -m pip install -r chapterstage_backend/requirements-live.txt
-export BAND_TRANSPORT_MODE=live
-export BAND_API_KEY=replace-me
-export BAND_API_URL=https://app.band.ai
-export BAND_WS_URL=wss://app.band.ai/api/v1/socket/websocket
-export BAND_AGENT_UUID_COORDINATOR=replace-me
-export BAND_AGENT_UUID_STRUCTURE=replace-me
-export BAND_AGENT_UUID_PEDAGOGY=replace-me
-export BAND_AGENT_UUID_BRAINSTORM=replace-me
-export BAND_AGENT_UUID_VISUAL_BUILDER=replace-me
-export BAND_AGENT_UUID_VERIFIER=replace-me
+./venv/bin/python -m pip install -r chapterstage_backend/requirements-live.txt
 ```
 
-Then restart the server and repeat steps 4-8. Live mode fails fast if the SDK or
-required credentials are missing. Keep `BAND_TRANSPORT_MODE=test` for local gates
-and deterministic development.
+Then set live values in `chapterstage_backend/.env`:
 
-## 12. Cleanup
+```dotenv
+BAND_TRANSPORT_MODE=live
+BAND_API_KEY=replace-me
+BAND_API_URL=https://app.band.ai
+BAND_WS_URL=wss://app.band.ai/api/v1/socket/websocket
+BAND_AGENT_UUID_COORDINATOR=replace-me
+BAND_AGENT_UUID_STRUCTURE=replace-me
+BAND_AGENT_UUID_PEDAGOGY=replace-me
+BAND_AGENT_UUID_BRAINSTORM=replace-me
+BAND_AGENT_UUID_VISUAL_BUILDER=replace-me
+BAND_AGENT_UUID_VERIFIER=replace-me
+```
 
-Stop the server, then remove local simulation artifacts:
+Restart the server before running the flow again. Keep
+`BAND_TRANSPORT_MODE=test` for deterministic local development.
+
+## 9. Cleanup
+
+Stop uvicorn, then remove local artifacts:
 
 ```bash
 rm -f chapterstage_backend/chapterstage_flow.db
@@ -610,11 +445,13 @@ rm -rf chapterstage_backend/.local/testing-flow
 ## Troubleshooting
 
 - `ModuleNotFoundError: app`: start uvicorn with `--app-dir chapterstage_backend`.
-- Job fails after enabling Ollama: confirm `ollama serve` is running and
-  `OLLAMA_MODEL` matches an installed model.
-- Job fails in live Band mode: check `BAND_API_KEY`,
-  `BAND_AGENT_UUID_COORDINATOR`, and per-agent UUID env vars.
-- Public URL points to `localhost:8000`: set `API_BASE_URL` and
-  `PUBLIC_SITE_BASE_URL` before starting the server.
-- Progress does not persist after restart: confirm `DATABASE_URL` points to a
-  file-backed SQLite database, not a temp file.
+- Health check fails in `run_flow.py`: confirm uvicorn is running on the same
+  port as `API_BASE_URL` in `.env`.
+- Ollama generation fails: confirm the Ollama app/server is running and
+  `OLLAMA_MODEL` exactly matches `ollama list`.
+- Job fails with invalid provider JSON: inspect `trace.json` and `events.sse`
+  from the runner output directory.
+- Public URL points to the wrong host: update `API_BASE_URL` and
+  `PUBLIC_SITE_BASE_URL` in `.env`, then restart uvicorn.
+- Progress does not survive restart: confirm `DATABASE_URL` points to a
+  file-backed SQLite database.
