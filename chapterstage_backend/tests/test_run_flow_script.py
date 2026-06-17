@@ -57,6 +57,10 @@ class FakeClient:
             })
         if path == "/api/v1/generation-jobs/job-1" and method == "GET":
             self.status_calls += 1
+            if self.scenario == "status_timeout":
+                if self.status_calls == 1:
+                    return _json_response(200, _status("queued", progress=0.0))
+                raise run_flow.FlowError("Timed out waiting for %s" % url)
             if self.scenario == "failed":
                 return _json_response(200, _status("failed_agent_workflow", error={
                     "code": "AGENT_WORKFLOW_FAILED",
@@ -215,6 +219,20 @@ def main():
     code = run_flow.run_flow(_options(tmp.name), client=client, stdout=stdout)
     check("failed health check exits before posting chapter",
           code == 1 and len(client.calls) == 1 and "Health check" in stdout.getvalue(),
+          receipt=stdout.getvalue())
+
+    tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+    client = FakeClient("status_timeout")
+    stdout = io.StringIO()
+    code = run_flow.run_flow(_options(tmp.name), client=client, stdout=stdout)
+    out_dir = Path(tmp.name) / "artifacts"
+    final_status = json.loads((out_dir / "job_status_final.json").read_text())
+    check("mid-poll timeout exits 1 with latest status and diagnostics",
+          code == 1
+          and final_status["status"] == "queued"
+          and (out_dir / "trace.json").is_file()
+          and (out_dir / "events.sse").is_file()
+          and "Timed out waiting" in stdout.getvalue(),
           receipt=stdout.getvalue())
 
     parsed = run_flow.parse_args([

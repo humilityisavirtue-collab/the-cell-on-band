@@ -32,9 +32,20 @@ class FakeProvider:
             return {"sections": ["A", "B"], "ideas": ["I1"]}
         if "Score" in messages[0]["content"]:
             return {"variant_id": "v9", "metric": "clarity", "value": 0.91}
-        if "storyboard" in messages[0]["content"]:
+        if "Create a modular screen storyboard" in messages[0]["content"]:
             return {"scenes": [{"id": 7, "kind": "quiz"}]}
         return {"result": "PASS", "receipts": "fake receipts"}
+
+
+class LooseVerifierProvider:
+    name = "loose-verifier"
+    model = "loose-verifier"
+
+    def __init__(self, result):
+        self.result = result
+
+    def generate_json(self, messages, schema, model=None):
+        return {"result": self.result, "receipts": "loose receipt"}
 
 
 def clear_provider_env():
@@ -74,6 +85,30 @@ def main():
     check("configured provider supplies verifier verdict",
           verdict["result"] == "PASS" and verdict["receipts"] == "fake receipts",
           receipt=verdict)
+
+    original_create = chapter_agents.create_provider
+    try:
+        os.environ["OLLAMA_MODEL"] = "fake-local"
+        chapter_agents.create_provider = lambda: LooseVerifierProvider("verified")
+        loose_verdict = chapter_agents.build_verifier_verdict({
+            "source_ref": "ch1",
+            "source_text": "A source excerpt.",
+            "storyboard": {"scenes": [{"id": "1", "kind": "text_screen"}]},
+        })
+        chapter_agents.create_provider = lambda: LooseVerifierProvider("FAIL")
+        fail_verdict = chapter_agents.build_verifier_verdict({
+            "source_ref": "ch1",
+            "source_text": "A source excerpt.",
+            "storyboard": {"scenes": [{"id": "1", "kind": "text_screen"}]},
+        })
+    finally:
+        chapter_agents.create_provider = original_create
+        clear_provider_env()
+
+    check("verifier normalizes positive provider verdicts to PASS",
+          loose_verdict["result"] == "PASS", receipt=loose_verdict)
+    check("verifier preserves explicit provider FAIL verdicts",
+          fail_verdict["result"] == "FAIL", receipt=fail_verdict)
 
     print("%d/%d gate checks passed" % (len(RAN) - len(FAILURES), len(RAN)))
     if FAILURES:

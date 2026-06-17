@@ -81,6 +81,8 @@ class UrllibClient:
                 headers=dict(exc.headers.items()),
                 body=exc.read(),
             )
+        except TimeoutError as exc:
+            raise FlowError("Timed out waiting for %s" % url) from exc
         except urllib.error.URLError as exc:
             raise FlowError("Could not reach %s: %s" % (url, exc.reason)) from exc
 
@@ -238,14 +240,23 @@ def _poll_job(http, options: FlowOptions, job_id: str, out: TextIO) -> dict:
     history = []
     deadline = time.monotonic() + options.timeout_seconds
     final_status = None
+    last_printed = None
     while time.monotonic() <= deadline:
-        status = _request_json(
-            http, "GET", _url(options, "/generation-jobs/%s" % job_id))
+        try:
+            status = _request_json(
+                http, "GET", _url(options, "/generation-jobs/%s" % job_id))
+        except FlowError:
+            if history:
+                _write_json(options.out_dir / "job_status_final.json", history[-1])
+            raise
         history.append(status)
         _write_json(options.out_dir / "job_status_history.json", history)
-        _print(out, "%s %.2f %s" % (
+        visible_status = (
             status.get("status"), float(status.get("progress", 0)),
-            status.get("current_step") or ""))
+            status.get("current_step") or "")
+        if visible_status != last_printed:
+            _print(out, "%s %.2f %s" % visible_status)
+            last_printed = visible_status
         if status.get("status") in {"completed", "failed_agent_workflow"}:
             final_status = status
             break

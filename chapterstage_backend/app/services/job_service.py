@@ -7,6 +7,7 @@ fetchable, which is what the frontend polls.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import uuid4
 
@@ -120,7 +121,8 @@ async def run_generation_job(job_id: str) -> None:
             from workflows.chapter_graph import ChapterWorkflow
 
             band = create_band_service()
-            state = ChapterWorkflow(band).run(
+            state = await asyncio.to_thread(
+                ChapterWorkflow(band).run,
                 job.id, chapter.title, chapter.source_text or "")
             job.band_room_id = getattr(band, "room_id", None)
             await session.commit()

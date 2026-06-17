@@ -40,6 +40,45 @@ class BadJsonProvider(JsonMixin):
         return "I am prose, not JSON."
 
 
+class FencedJsonProvider(JsonMixin):
+    name = "fenced-json"
+    model = "fenced-json"
+
+    def generate_text(self, messages, model=None, temperature=None,
+                      json_schema=None):
+        return '```json\n{"sections": ["intro"], "ideas": ["idea"]}\n```'
+
+
+class TruncatedJsonProvider(JsonMixin):
+    name = "truncated-json"
+    model = "truncated-json"
+
+    def generate_text(self, messages, model=None, temperature=None,
+                      json_schema=None):
+        return '{"sections": ["intro"], "ideas": ["idea"]'
+
+
+class WrongKeysThenValidProvider(JsonMixin):
+    name = "wrong-keys-then-valid"
+    model = "wrong-keys-then-valid"
+
+    def __init__(self):
+        self.calls = 0
+
+    def generate_text(self, messages, model=None, temperature=None,
+                      json_schema=None):
+        self.calls += 1
+        if self.calls == 1:
+            return '{"chapter": "Chapter 1: The Workshop"'
+        return '{"sections": ["workshop"], "ideas": ["try a simple machine"]}'
+
+
+STRUCTURE_SCHEMA = {
+    "type": "object",
+    "required": ["sections", "ideas"],
+}
+
+
 def main():
     print("test_llm_provider_router.py — provider selection")
     clear_env()
@@ -95,6 +134,24 @@ def main():
         failed = ("Provider returned invalid JSON" in str(exc)
                   and "I am prose, not JSON." in str(exc))
     check("invalid provider JSON error includes response preview", failed)
+
+    parsed = FencedJsonProvider().generate_json([], STRUCTURE_SCHEMA)
+    check("JSON parser accepts fenced provider objects",
+          parsed["sections"] == ["intro"] and parsed["ideas"] == ["idea"],
+          receipt=parsed)
+
+    parsed = TruncatedJsonProvider().generate_json([], STRUCTURE_SCHEMA)
+    check("JSON parser repairs truncated provider objects",
+          parsed["sections"] == ["intro"] and parsed["ideas"] == ["idea"],
+          receipt=parsed)
+
+    provider = WrongKeysThenValidProvider()
+    parsed = provider.generate_json([], STRUCTURE_SCHEMA)
+    check("JSON parser retries objects missing required keys",
+          provider.calls == 2
+          and parsed["sections"] == ["workshop"]
+          and parsed["ideas"] == ["try a simple machine"],
+          receipt=parsed)
 
     print("%d/%d gate checks passed" % (len(RAN) - len(FAILURES), len(RAN)))
     if FAILURES:
