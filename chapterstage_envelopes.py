@@ -10,7 +10,7 @@ Artifact chain (deck slide 7), each link a KIND here:
   knowledge_pack  structure  -> pedagogy/brainstorm  (chapter decomposed + cited)
   brainstorm_score brainstorm -> coordinator          (a scored variant from the loop)
   storyboard      visual     -> verifier              (interactive scene plan JSON)
-  module          verifier   -> room                  (the VERIFIED module — done-equiv)
+  module          verifier   -> coordinator           (the VERIFIED terminal module)
 
 REJECT rules carry the product thesis as mechanical law, not vibes:
   - knowledge_pack WITHOUT a source_ref is REJECTED. A pack with no source is a
@@ -38,7 +38,7 @@ KINDS = frozenset({
     "knowledge_pack",   # structure -> pedagogy/brainstorm: chapter decomposed + cited
     "brainstorm_score", # brainstorm -> coordinator: one scored variant from the loop
     "storyboard",       # visual -> verifier: interactive scene plan (Storyboard JSON)
-    "module",           # verifier -> room: the VERIFIED module (embeds PASS verdict)
+    "module",           # verifier -> coordinator: VERIFIED terminal module
 })
 
 ROLES = frozenset({
@@ -221,7 +221,7 @@ def _selftest():
 
     # -- positive: module embedding a PASS faithfulness verdict validates
     good_module = make_envelope(
-        "module", "cs-001", "verifier", "room",
+        "module", "cs-001", "verifier", "coordinator",
         verdict={"gate": "source_faithfulness", "result": "PASS",
                  "receipts": "$ verify.py\n12/12 claims grounded in ch.3"})
     check("module embedding PASS verdict validates clean",

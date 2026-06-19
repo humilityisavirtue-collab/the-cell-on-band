@@ -7,7 +7,9 @@ populated at M5). Pydantic validation failures are reshaped into the §10
 """
 from __future__ import annotations
 
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -15,14 +17,24 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import chapters, health, jobs
+from app.api.v1 import chapters, experiences, health, jobs
 from app.config import settings
 from app.errors import APIError, INTERNAL_ERROR, INVALID_REQUEST, api_error_handler
+
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     from app.database import init_db
+    logger.info(
+        "chapterstage starting env=%s band_mode=%s llm_provider=%s ollama_model=%s",
+        settings.APP_ENV, settings.BAND_TRANSPORT_MODE, settings.LLM_PROVIDER,
+        settings.OLLAMA_MODEL or "<unset>")
     await init_db()
     yield
 
@@ -33,6 +45,7 @@ app = FastAPI(title="ChapterStage Backend", version=settings.VERSION,
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(chapters.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
+app.include_router(experiences.router, prefix="/api/v1")
 
 
 @app.exception_handler(APIError)
@@ -52,6 +65,7 @@ async def _validation_error(_request: Request,
 
 @app.exception_handler(Exception)
 async def _unhandled(_request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("unhandled api exception")
     return JSONResponse(
         status_code=500,
         content={"error": {"code": INTERNAL_ERROR, "message": str(exc),
@@ -63,6 +77,25 @@ _site_root = settings.GENERATED_SITE_ROOT
 os.makedirs(_site_root, exist_ok=True)
 app.mount("/public/experiences",
           StaticFiles(directory=_site_root, html=True), name="experiences")
+
+
+@app.middleware("http")
+async def _log_api_requests(request: Request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - started) * 1000
+        logger.exception(
+            "api request failed method=%s path=%s duration_ms=%.1f",
+            request.method, request.url.path, duration_ms)
+        raise
+    duration_ms = (time.perf_counter() - started) * 1000
+    if request.url.path.startswith("/api/"):
+        logger.info(
+            "api request method=%s path=%s status=%s duration_ms=%.1f",
+            request.method, request.url.path, response.status_code, duration_ms)
+    return response
 
 
 @app.middleware("http")

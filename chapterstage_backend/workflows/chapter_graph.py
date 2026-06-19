@@ -12,6 +12,7 @@ the orchestration logic here does not change.
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -22,24 +23,50 @@ _BAND = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_BAND))
 import chapterstage_envelopes as cse  # noqa: E402
 
+logger = logging.getLogger(__name__)
+
 
 class ChapterWorkflow:
     """Drives the artifact chain through band_service. Returns the final state;
     status == 'completed' ONLY if the module landed via a live room."""
 
-    def __init__(self, band_service):
+    def __init__(self, band_service=None):
+        if band_service is None:
+            from app.services.band_transport.factory import create_band_service
+            band_service = create_band_service()
         self.band = band_service
 
-    def run(self, job_id: str, source_ref: str) -> dict:
+    def run(
+            self, job_id: str, source_ref: str, source_text: str = "",
+            audience_level: str = "beginner", experience_style: str = "visual_story",
+            target_screen_count: int | None = None,
+            on_stage_complete=None) -> dict:
         self.band.open_room(job_id)
         for role, _slot, _fn, _to in nodes.STAGES:
             self.band.recruit(role)
 
         state: dict = {"job_id": job_id, "source_ref": source_ref,
+                       "source_text": source_text,
+                       "audience_level": audience_level,
+                       "experience_style": experience_style,
+                       "target_screen_count": target_screen_count,
                        "status": "running", "log": []}
 
-        for role, slot, node_fn, to_role in nodes.STAGES:
-            env = node_fn(state)                 # the agent's own graph runs + emits
+        total_stages = len(nodes.STAGES)
+        for index, (role, slot, node_fn, to_role) in enumerate(nodes.STAGES, start=1):
+            input_envelope = (
+                state.get(nodes.STAGES[index - 2][1]) if index > 1 else None
+            )
+            try:
+                env = node_fn(state)             # the agent's own graph runs + emits
+            except Exception as exc:
+                logger.exception("chapter agent failed role=%s job_id=%s",
+                                 role, job_id)
+                state["status"] = "failed"
+                state["error_stage"] = role
+                state["error_type"] = exc.__class__.__name__
+                state["error"] = str(exc)
+                return state
             problems = cse.validate(env)         # node output validated by the contract
             if problems:
                 state["status"] = "failed"
@@ -48,12 +75,27 @@ class ChapterWorkflow:
                 return state
             state[slot] = env
             state["log"].append(role)
-            # THE INVARIANT: the handoff to the next role rides band_service. If the
-            # room is severed, the next agent is never triggered -> stall.
-            if not self.band.handoff(role, to_role, env):
+            if on_stage_complete is not None:
+                try:
+                    on_stage_complete(index, total_stages, role, input_envelope, env)
+                except Exception:
+                    logger.exception("stage progress callback failed role=%s job_id=%s",
+                                     role, job_id)
+            # THE INVARIANT: each inter-agent handoff rides band_service. The
+            # verifier's module is terminal, so it is not @mentioned to a fake
+            # "room" participant.
+            if to_role is not None and not self.band.handoff(role, to_role, env):
                 state["status"] = "stalled"
+                state["error_stage"] = role
+                state["error"] = "Band handoff failed from %s to %s." % (
+                    role, to_role)
+                transport = getattr(self.band, "transport", None)
+                last_error = getattr(transport, "last_error", None)
+                if last_error:
+                    state["transport_error"] = last_error
                 return state
 
-        # completed ONLY if we got here: every handoff (incl. verifier->room) landed
+        # completed ONLY if we got here: every real inter-agent handoff landed and
+        # the verifier emitted a valid module.
         state["status"] = "completed"
         return state

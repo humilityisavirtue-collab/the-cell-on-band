@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column
+from sqlalchemy import Column, UniqueConstraint
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
@@ -60,6 +60,7 @@ class GenerationJob(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     completed_at: datetime | None = None
+    cancel_requested_at: datetime | None = None
 
 
 class Experience(SQLModel, table=True):
@@ -82,4 +83,22 @@ class AgentTraceEvent(SQLModel, table=True):
     title: str
     message: str
     payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    elapsed_seconds: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=_now)
+
+
+class ReaderProgress(SQLModel, table=True):
+    __tablename__ = "reader_progress"
+    __table_args__ = (
+        UniqueConstraint("experience_id",
+                         name="uq_reader_progress_experience"),
+    )
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    experience_id: str = Field(index=True)
+    current_screen_id: str | None = None
+    completed_screen_ids: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON))
+    last_checkpoint: str | None = None
+    interaction_state: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)

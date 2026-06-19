@@ -62,8 +62,57 @@ class JobStatusResponse(BaseModel):
     progress: float
     current_step: Optional[str] = None
     band_room_id: Optional[str] = None
+    band_room_url: Optional[str] = None
     experience_id: Optional[str] = None
     public_url: Optional[str] = None
     error: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobStatusResponse] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
+class TraceEventResponse(BaseModel):
+    id: str
+    agent_name: str
+    event_type: str
+    title: str
+    message: str
+    payload: dict = Field(default_factory=dict)
+    elapsed_seconds: Optional[int] = None
+    created_at: datetime
+
+
+class JobTraceResponse(BaseModel):
+    job_id: str
+    band_room_id: Optional[str] = None
+    band_room_url: Optional[str] = None
+    events: list[TraceEventResponse] = Field(default_factory=list)
+
+
+class ExperienceResponse(BaseModel):
+    experience_id: str
+    job_id: str
+    public_url: str
+    metadata: dict
+    created_at: datetime
+
+
+class ReaderProgressUpdate(BaseModel):
+    current_screen_id: Optional[str] = None
+    completed_screen_ids: list[str] = Field(default_factory=list)
+    last_checkpoint: Optional[str] = None
+    interaction_state: dict = Field(default_factory=dict)
+
+
+class ReaderProgressResponse(BaseModel):
+    experience_id: str
+    current_screen_id: Optional[str] = None
+    completed_screen_ids: list[str] = Field(default_factory=list)
+    last_checkpoint: Optional[str] = None
+    interaction_state: dict = Field(default_factory=dict)
+    updated_at: Optional[datetime] = None

