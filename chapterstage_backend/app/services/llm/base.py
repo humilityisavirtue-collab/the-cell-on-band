@@ -45,11 +45,13 @@ class JsonMixin:
             self, messages: list[ChatMessage], schema: dict,
             model: str | None = None) -> dict:
         json_messages = _with_json_instruction(messages, schema)
-        text = self.generate_text(  # type: ignore[attr-defined]
-            json_messages, model=model, temperature=0, json_schema=schema)
+        text = ""
+        first_error: Exception | None = None
         try:
+            text = self.generate_text(  # type: ignore[attr-defined]
+                json_messages, model=model, temperature=0, json_schema=schema)
             return _parse_json_object(text, schema)
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, LLMProviderError) as exc:
             first_error = exc
 
         retry_messages = list(json_messages)
@@ -66,15 +68,16 @@ class JsonMixin:
                 "markdown fences, comments, or trailing text."
             ),
         })
-        retry_text = self.generate_text(  # type: ignore[attr-defined]
-            retry_messages, model=model, temperature=0, json_schema=schema)
+        retry_text = ""
         try:
+            retry_text = self.generate_text(  # type: ignore[attr-defined]
+                retry_messages, model=model, temperature=0, json_schema=schema)
             return _parse_json_object(retry_text, schema)
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, LLMProviderError) as exc:
             preview = _preview(retry_text or text)
             detail = " Preview: %r" % preview if preview else ""
             raise LLMProviderError(
-                "Provider returned invalid JSON.%s" % detail) from first_error
+                "Provider returned invalid JSON.%s" % detail) from (first_error or exc)
 
 
 def _with_json_instruction(

@@ -1,6 +1,7 @@
 """OpenAI-compatible chat completions provider."""
 from __future__ import annotations
 
+import json
 import time
 
 import httpx
@@ -27,9 +28,7 @@ class OpenAIProvider(JsonMixin):
             temperature: float | None = None,
             json_schema: dict | None = None) -> str:
         payload = self._build_payload(messages, model, temperature, json_schema)
-        response = self._post_with_retries(payload, self._build_headers())
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+        return self._post_with_retries(payload, self._build_headers())
 
     def _build_payload(
             self, messages: list[ChatMessage], model: str | None,
@@ -46,7 +45,7 @@ class OpenAIProvider(JsonMixin):
 
     def _post_with_retries(
             self, payload: dict, headers: dict[str, str],
-            allow_fallback: bool = True) -> httpx.Response:
+            allow_fallback: bool = True) -> str:
         attempts = len(self.retry_delays) + 1
         with httpx.Client(timeout=120) as client:
             for attempt in range(attempts):
@@ -57,7 +56,7 @@ class OpenAIProvider(JsonMixin):
                         json=payload,
                     )
                     response.raise_for_status()
-                    return response
+                    return self._extract_content(response)
                 except httpx.HTTPStatusError as exc:
                     status = exc.response.status_code
                     if status not in self.retry_statuses or attempt >= attempts - 1:
@@ -68,11 +67,33 @@ class OpenAIProvider(JsonMixin):
                                 fallback_payload, headers, allow_fallback=False)
                         raise self._provider_error(exc, payload) from exc
                     self._sleep(self.retry_delays[attempt])
-                except httpx.RequestError as exc:
+                except (httpx.RequestError, LLMProviderError) as exc:
                     if attempt >= attempts - 1:
+                        if allow_fallback and isinstance(exc, LLMProviderError) \
+                                and self._can_fallback_for_payload(payload):
+                            fallback_payload = dict(payload)
+                            fallback_payload["model"] = self.fallback_model
+                            return self._post_with_retries(
+                                fallback_payload, headers, allow_fallback=False)
                         raise self._provider_error(exc, payload) from exc
                     self._sleep(self.retry_delays[attempt])
         raise self._provider_error(None, payload)
+
+    def _extract_content(self, response: httpx.Response) -> str:
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            body = response.text[:500] if response.text else ""
+            raise LLMProviderError(
+                "Provider returned non-JSON response: %r" % body) from exc
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, TypeError, IndexError) as exc:
+            raise LLMProviderError(
+                "Provider response missing choices/message/content") from exc
+        if not isinstance(content, str):
+            raise LLMProviderError("Provider response content is not a string")
+        return content
 
     def _can_fallback(self, status: int, payload: dict) -> bool:
         model = str(payload.get("model") or "")
@@ -82,8 +103,12 @@ class OpenAIProvider(JsonMixin):
             and model != self.fallback_model
         )
 
+    def _can_fallback_for_payload(self, payload: dict) -> bool:
+        model = str(payload.get("model") or "")
+        return bool(self.fallback_model) and model != self.fallback_model
+
     def _provider_error(
-            self, exc: httpx.HTTPError | None, payload: dict) -> LLMProviderError:
+            self, exc: Exception | None, payload: dict) -> LLMProviderError:
         model = str(payload.get("model") or self.model)
         if isinstance(exc, httpx.HTTPStatusError):
             response = exc.response
@@ -94,6 +119,10 @@ class OpenAIProvider(JsonMixin):
             return LLMProviderError(
                 "%s generation failed for model %s: %s" % (
                     self.name, model, detail))
+        if isinstance(exc, LLMProviderError):
+            return LLMProviderError(
+                "%s generation failed for model %s: %s" % (
+                    self.name, model, exc))
         return LLMProviderError(
             "%s generation failed for model %s: %s" % (
                 self.name, model, exc or "unknown error"))
