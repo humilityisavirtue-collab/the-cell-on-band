@@ -83,6 +83,7 @@ class TraceEventResponse(BaseModel):
     title: str
     message: str
     payload: dict = Field(default_factory=dict)
+    elapsed_seconds: Optional[int] = None
     created_at: datetime
 
 

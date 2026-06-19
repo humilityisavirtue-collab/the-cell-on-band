@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -26,6 +27,10 @@ from app.services.site_storage import write_modular_site
 logger = logging.getLogger(__name__)
 
 TERMINAL_STATUSES = {"completed", "failed_agent_workflow", "cancelled"}
+
+
+def _elapsed_seconds(job: GenerationJob) -> int:
+    return int((datetime.utcnow() - job.created_at).total_seconds())
 
 
 async def create_chapter_from_text(
@@ -107,10 +112,12 @@ async def request_cancel_job(session: AsyncSession, job_id: str) -> GenerationJo
     session.add(job)
     await session.commit()
     await session.refresh(job)
+    elapsed = _elapsed_seconds(job)
     await sse_bus.publish(job.id, "job_progress", {
         "status": job.status,
         "progress": job.progress,
         "message": "Cancellation requested.",
+        "elapsed_seconds": elapsed,
     })
     logger.info("generation job cancellation requested job_id=%s", job.id)
     return job
@@ -178,12 +185,64 @@ async def run_generation_job(job_id: str) -> None:
             from workflows.chapter_graph import ChapterWorkflow
 
             band = create_band_service()
+            loop = asyncio.get_running_loop()
+
+            async def _persist_agent_stage(
+                    stage_index: int, total_stages: int, role: str,
+                    input_envelope: dict | None, output_envelope: dict | None) -> None:
+                progress = 0.20 + (stage_index / total_stages) * 0.48
+                elapsed = int((datetime.utcnow() - job.created_at).total_seconds())
+                kind = (output_envelope or {}).get("kind", "unknown")
+                to_role = (output_envelope or {}).get("to", "next")
+                title = "%s agent completed" % role
+                message = "Produced %s envelope for %s" % (kind, to_role)
+                payload = {
+                    "stage_index": stage_index,
+                    "total_stages": total_stages,
+                    "input": input_envelope,
+                    "output": output_envelope,
+                }
+                async with async_session() as sess:
+                    event = AgentTraceEvent(
+                        job_id=job.id,
+                        band_room_id=job.band_room_id,
+                        agent_name=role,
+                        event_type="agent_message",
+                        title=title,
+                        message=message,
+                        payload=payload,
+                        elapsed_seconds=elapsed,
+                    )
+                    sess.add(event)
+                    await sess.commit()
+                await sse_bus.publish(job.id, "agent_message", {
+                    "agent_id": role,
+                    "agent_name": role,
+                    "event_type": "agent_message",
+                    "title": title,
+                    "message": message,
+                    "payload": payload,
+                    "progress": progress,
+                    "elapsed_seconds": elapsed,
+                    "status": "running",
+                })
+
+            def _on_stage_complete(
+                    stage_index: int, total_stages: int, role: str,
+                    input_envelope: dict | None, output_envelope: dict | None) -> None:
+                asyncio.run_coroutine_threadsafe(
+                    _persist_agent_stage(
+                        stage_index, total_stages, role, input_envelope, output_envelope),
+                    loop,
+                )
+
             state = await asyncio.to_thread(
                 ChapterWorkflow(band).run,
                 job.id, chapter.title, chapter.source_text or "",
                 audience_level=job.audience_level,
                 experience_style=job.experience_style,
-                target_screen_count=job.target_screen_count)
+                target_screen_count=job.target_screen_count,
+                on_stage_complete=_on_stage_complete)
             job.band_room_id = getattr(band, "room_id", None)
             await session.commit()
             await _trace_handoffs(session, job, band)
@@ -244,12 +303,14 @@ async def run_generation_job(job_id: str) -> None:
             job.updated_at = _now()
             session.add(job)
             await session.commit()
+            elapsed = _elapsed_seconds(job)
             await sse_bus.publish(job.id, "experience_ready", {
                 "experience_id": experience_id,
                 "public_url": public_url,
+                "elapsed_seconds": elapsed,
             })
-            logger.info("generation job completed job_id=%s experience_id=%s",
-                        job.id, experience_id)
+            logger.info("generation job completed job_id=%s experience_id=%s elapsed=%s",
+                        job.id, experience_id, elapsed)
         except Exception as exc:
             if await _finish_if_cancel_requested(session, job):
                 return
@@ -297,11 +358,13 @@ async def _complete_cancelled_job(
     session.add(job)
     await session.commit()
     await session.refresh(job)
+    elapsed = _elapsed_seconds(job)
     logger.info("generation job cancelled job_id=%s", job.id)
     await sse_bus.publish(job.id, "job_cancelled", {
         "status": job.status,
         "progress": job.progress,
         "message": "Job cancelled.",
+        "elapsed_seconds": elapsed,
     })
     return job
 
@@ -315,12 +378,14 @@ async def _set_job(
     job.updated_at = _now()
     session.add(job)
     await session.commit()
-    logger.info("generation job progress job_id=%s status=%s progress=%.2f step=%s",
-                job.id, status, progress, step)
+    elapsed = _elapsed_seconds(job)
+    logger.info("generation job progress job_id=%s status=%s progress=%.2f step=%s elapsed=%s",
+                job.id, status, progress, step, elapsed)
     await sse_bus.publish(job.id, "job_progress", {
         "status": status,
         "progress": progress,
         "message": step,
+        "elapsed_seconds": elapsed,
     })
 
 
@@ -334,18 +399,21 @@ async def _fail_job(
     job.updated_at = _now()
     session.add(job)
     await session.commit()
-    logger.error("generation job failed job_id=%s code=%s message=%s",
-                 job.id, code, message)
+    elapsed = _elapsed_seconds(job)
+    logger.error("generation job failed job_id=%s code=%s message=%s elapsed=%s",
+                 job.id, code, message, elapsed)
     await sse_bus.publish(job.id, "job_failed", {
         "status": job.status,
         "progress": job.progress,
         "message": message,
         "error": {"code": code, "message": message},
+        "elapsed_seconds": elapsed,
     })
 
 
 async def _trace_handoffs(
         session: AsyncSession, job: GenerationJob, band) -> None:
+    elapsed = _elapsed_seconds(job)
     for rec in getattr(band, "handoffs", []):
         event = AgentTraceEvent(
             job_id=job.id,
@@ -355,12 +423,17 @@ async def _trace_handoffs(
             title="%s to %s" % (rec.get("from"), rec.get("to")),
             message="Delivered %s envelope." % rec.get("kind", "unknown"),
             payload=rec,
+            elapsed_seconds=elapsed,
         )
         session.add(event)
         await sse_bus.publish(job.id, "agent_message", {
+            "agent_id": rec.get("from", "agent"),
             "agent_name": event.agent_name,
+            "event_type": "handoff",
             "title": event.title,
             "message": event.message,
+            "payload": event.payload,
+            "elapsed_seconds": elapsed,
         })
     await session.commit()
 
@@ -370,6 +443,7 @@ async def _trace_workflow_failure(
     log_entries = state.get("log") or ["workflow"]
     stage = state.get("error_stage") or log_entries[-1]
     message = _workflow_failure_message(state)
+    elapsed = _elapsed_seconds(job)
     event = AgentTraceEvent(
         job_id=job.id,
         band_room_id=job.band_room_id,
@@ -385,6 +459,7 @@ async def _trace_workflow_failure(
             "transport_error": state.get("transport_error"),
             "log": state.get("log", []),
         },
+        elapsed_seconds=elapsed,
     )
     session.add(event)
     await session.commit()
@@ -393,6 +468,7 @@ async def _trace_workflow_failure(
         "title": event.title,
         "message": event.message,
         "payload": event.payload,
+        "elapsed_seconds": elapsed,
     })
 
 

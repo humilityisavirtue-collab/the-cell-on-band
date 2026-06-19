@@ -25,6 +25,7 @@ async def init_db() -> None:
         migrated_reader_progress = await _migrate_global_reader_progress(conn)
         await conn.run_sync(SQLModel.metadata.create_all)
         await _ensure_generation_jobs_cancel_column(conn)
+        await _ensure_agent_trace_events_elapsed_seconds_column(conn)
         if migrated_reader_progress:
             await conn.execute(text("""
                 INSERT OR IGNORE INTO reader_progress (
@@ -76,6 +77,24 @@ async def _ensure_generation_jobs_cancel_column(conn) -> None:
     if "cancel_requested_at" not in column_names:
         await conn.execute(text(
             "ALTER TABLE generation_jobs ADD COLUMN cancel_requested_at DATETIME"))
+
+
+async def _ensure_agent_trace_events_elapsed_seconds_column(conn) -> None:
+    """Add elapsed timer column to existing agent trace event tables."""
+    if conn.dialect.name != "sqlite":
+        return
+    exists = (await conn.execute(text(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='agent_trace_events'"
+    ))).scalar_one_or_none()
+    if not exists:
+        return
+    columns = (await conn.execute(
+        text("PRAGMA table_info(agent_trace_events)"))).fetchall()
+    column_names = {row[1] for row in columns}
+    if "elapsed_seconds" not in column_names:
+        await conn.execute(text(
+            "ALTER TABLE agent_trace_events ADD COLUMN elapsed_seconds INTEGER"))
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

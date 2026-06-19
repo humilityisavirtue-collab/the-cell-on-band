@@ -83,6 +83,7 @@ class AgentTraceEvent(SQLModel, table=True):
     title: str
     message: str
     payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    elapsed_seconds: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=_now)
 
 

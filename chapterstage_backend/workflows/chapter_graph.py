@@ -39,7 +39,8 @@ class ChapterWorkflow:
     def run(
             self, job_id: str, source_ref: str, source_text: str = "",
             audience_level: str = "beginner", experience_style: str = "visual_story",
-            target_screen_count: int | None = None) -> dict:
+            target_screen_count: int | None = None,
+            on_stage_complete=None) -> dict:
         self.band.open_room(job_id)
         for role, _slot, _fn, _to in nodes.STAGES:
             self.band.recruit(role)
@@ -51,7 +52,11 @@ class ChapterWorkflow:
                        "target_screen_count": target_screen_count,
                        "status": "running", "log": []}
 
-        for role, slot, node_fn, to_role in nodes.STAGES:
+        total_stages = len(nodes.STAGES)
+        for index, (role, slot, node_fn, to_role) in enumerate(nodes.STAGES, start=1):
+            input_envelope = (
+                state.get(nodes.STAGES[index - 2][1]) if index > 1 else None
+            )
             try:
                 env = node_fn(state)             # the agent's own graph runs + emits
             except Exception as exc:
@@ -70,6 +75,12 @@ class ChapterWorkflow:
                 return state
             state[slot] = env
             state["log"].append(role)
+            if on_stage_complete is not None:
+                try:
+                    on_stage_complete(index, total_stages, role, input_envelope, env)
+                except Exception:
+                    logger.exception("stage progress callback failed role=%s job_id=%s",
+                                     role, job_id)
             # THE INVARIANT: each inter-agent handoff rides band_service. The
             # verifier's module is terminal, so it is not @mentioned to a fake
             # "room" participant.

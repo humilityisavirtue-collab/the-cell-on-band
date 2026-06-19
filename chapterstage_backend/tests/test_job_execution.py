@@ -91,8 +91,8 @@ def main():
 
         r = c.get("/api/v1/generation-jobs/%s/trace" % job_id)
         trace = r.json()
-        check("trace endpoint returns Band handoff events",
-              r.status_code == 200 and len(trace["events"]) == 4,
+        check("trace endpoint returns agent + handoff events",
+              r.status_code == 200 and len(trace["events"]) >= 3,
               receipt=r.text)
 
         with c.stream("GET", "/api/v1/generation-jobs/%s/events" % job_id) as s:

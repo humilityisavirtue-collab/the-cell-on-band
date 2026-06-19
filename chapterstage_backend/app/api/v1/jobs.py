@@ -120,4 +120,5 @@ async def get_trace(
         events=[TraceEventResponse(
             id=e.id, agent_name=e.agent_name, event_type=e.event_type,
             title=e.title, message=e.message, payload=e.payload,
+            elapsed_seconds=e.elapsed_seconds,
             created_at=e.created_at) for e in rows])

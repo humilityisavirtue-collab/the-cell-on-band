@@ -1,81 +1,156 @@
-# Hackathon Submission Report — The Cell, on Band
+# ChapterStage — Hackathon Submission Slides
 
-> **One-liner:** A provably load-bearing multi-agent software delivery loop that runs on Band as the coordination transport — and a working ChapterStage backend that turns book chapters into verified, interactive learning mini-sites built by that agent team.
+> **One-liner:** ChapterStage turns any dense chapter or topic — from operating systems to black holes — into a verified, interactive visual learning experience, built live by a team of Band agents and served as a public mini-site.
 
 ---
 
 ## Slide 1: What We Built
 
-- **Project name:** The Cell, on Band  
-- **Event:** Band of Agents Hackathon (lablab.ai, June 12–19, 2026)  
-- **Track:** Track 2 — Multi-Agent Software Development  
-- **Submission angle:** Band is not a chat log or notification mirror; it is the live, load-bearing collaboration layer. We made that claim falsifiable in code.
-- **Two layered deliverables:**
-  1. **Cell-on-Band chassis** — a 4-agent loop (Planner / Engineer / Reviewer / Coordinator) with handoff envelopes, consent gates, and kill-test harnesses.
-  2. **ChapterStage backend** — a FastAPI service on that chassis that converts a pasted chapter or PDF into a CSP-safe, public interactive learning site.
+- **Product name:** ChapterStage
+- **Event:** Band of Agents Hackathon (lablab.ai, June 12–19, 2026)
+- **Track:** Track 2 — Multi-Agent Software Development
+- **The pitch:** Paste a chapter, upload a PDF, or enter a topic. Choose your audience and style. Watch a team of specialist agents plan, visualize, build, verify, and publish a beautiful interactive chapter site in seconds.
+- **Output:** A hosted HTML/CSS/JS mini-site with screens like narrative scenes, concept maps, flow diagrams, timelines, quizzes, and recaps.
+- **Frontend:** Kotlin Multiplatform + Compose Multiplatform app that controls the workflow and renders the final URL.
+- **Backend:** FastAPI service orchestrating Band remote agents through LangGraph.
 
 ---
 
-## Slide 2: The Problem We Are Solving
+## Slide 2: The Problem
 
-- Hackathon entries often claim "multi-agent collaboration" but cannot prove the platform is actually required for the loop to work.
-- Generated content from AI agents is usually trusted implicitly, leaving demo deployments open to remote-script injection, eval-based XSS, and network egress.
-- Most agent workflows are black boxes: humans cannot see who did what, when, or why a job failed.
-- Learning-content creation is slow, manual, and hard to adapt for different audiences.
+- Dense chapters and technical topics are hard to absorb from plain text or slides.
+- Creating rich, audience-adapted visual learning content is slow and expensive.
+- AI-generated interactive content is often unsafe to publish: remote scripts, eval-based attacks, and network egress are common risks.
+- Existing "multi-agent" demos rarely prove the agent platform is actually required for the workflow.
 
-Our solution addresses all three: **provable platform dependency**, **verified untrusted output**, and **observable agent teamwork**.
-
----
-
-## Slide 3: The 4-Agent Loop (Cell-on-Band)
-
-| Band role | Cell role | Job on Band |
-|-----------|-----------|-------------|
-| Planner   | Gamer     | Decomposes the ask and posts a `spec` envelope |
-| Engineer  | Diamond   | Claims the spec, builds, and posts an `artifact` envelope |
-| Reviewer  | Club      | Runs a can-fail gate and posts a `verdict` envelope |
-| Coordinator | Nucleus | Recruits, routes, grants consent, and calls `done` only on PASS |
-
-- Every handoff is an `@mention` carrying one fenced-JSON **envelope**: prose for humans, structure for the loop.
-- Three rules are enforced in **code, not in prompts**:
-  1. Reviewer **REJECTS** any artifact missing a checkout-able `ref`.
-  2. Coordinator **REFUSES** to emit `done` without an embedded `PASS` verdict.
-  3. Engineer **BLOCKS** unsafe actions (deletion, network push, spend) and posts a `consent_request`.
+**Our solution:** A product that generates safe, visual, audience-tailored learning experiences — with verifiable proof that the agent collaboration layer is real.
 
 ---
 
-## Slide 4: Why This Is "Load-Bearing" (The Core Claim)
+## Slide 3: Product Concept — From Source to Site
 
-- Hackathon rule: Band must be part of the actual collaboration layer.
-- We made the claim **falsifiable** with `gate_band_loadbearing.py`:
-  - Drive the loop to completion with Band alive (positive control).
-  - Sever Band mid-loop and prove the loop **MUST stall** — no `done` envelope by any path.
-  - Negative controls, consume-path scan (no agent reads workflow state except from Band), and a decoy sweep prove the gate itself can go red.
-- **Result:** 16/16 gate checks pass. Exit 0 = Band is load-bearing in this build.
+**Input examples:**
+
+- A PDF chapter on "Process Scheduling"
+- Pasted text about "Black Holes"
+- A dense explainer on "The French Revolution"
+- Notes on "Neural Networks"
+
+**User choices:**
+
+- Audience: Beginner / Intermediate / Expert
+- Style: Visual Story / Lecture Mode / Concept Map First / Quiz First / Case Study
+- Target screen count: 6–10 scenes
+- Auto-brainstorm: on / off
+
+**Output:** A public URL like  
+`https://api.chapterstage.dev/public/experiences/exp_abc123/index.html`
 
 ---
 
-## Slide 5: ChapterStage — The Demo Product
+## Slide 4: Example — "Black Holes" for Beginners
 
-- **Product:** A Band-powered multi-agent system that converts a book chapter, PDF chapter, pasted text, or dense document into a verified, interactive visual learning mini-site.
-- **Frontend client:** Kotlin Multiplatform app (handoff documented).
-- **Backend stack:** FastAPI + Python workers + Band.ai remote agents + LangGraph.
-- **Output:** A hosted HTML/CSS/JS chapter experience URL.
-- **User flow:** paste or upload a chapter → choose audience/style → agents plan, structure, brainstorm, build, verify, and publish → open public URL.
+1. User pastes an article on black holes.
+2. Structure Agent extracts key concepts: event horizon, singularity, spaghettification, Hawking radiation.
+3. Pedagogy Agent identifies likely confusions and quiz points.
+4. Brainstorm Agent scores presentation variants and picks "visual story".
+5. Visual Builder generates:
+   - Scene 1: Narrative intro with a callout on gravity
+   - Scene 2: Diagram of a black hole with labeled nodes
+   - Scene 3: Timeline from star collapse to evaporation
+   - Scene 4: Quiz checkpoint
+   - Scene 5: Recap checklist
+6. Verifier checks source faithfulness and safety.
+7. Site is published; user opens it in the app WebView.
 
 ---
 
-## Slide 6: Backend Architecture
+## Slide 5: The Frontend — KMP Control Panel
+
+Built with **Kotlin Multiplatform + Compose Multiplatform**.
+
+**Screens:**
+
+| Screen | Purpose |
+|--------|---------|
+| Home | Product explanation + start CTA |
+| Create Chapter | Paste text or upload PDF/TXT |
+| Generation Settings | Audience, style, screen count, brainstorm toggle |
+| Generation Progress | Live progress bar + agent event feed |
+| Agent Trace | Visible Band collaboration timeline |
+| Experience Viewer | In-app WebView of the generated public URL |
+
+**Frontend does NOT:** parse generated HTML, implement per-platform renderers, store credentials, or call LLMs directly.
+
+---
+
+## Slide 6: Frontend Architecture
+
+```text
+chapterstage-kmp/
+  composeApp/
+    commonMain/
+      data/
+        remote/        # Ktor client, SSE streaming
+        dto/           # @Serializable request/response models
+        repository/    # ChapterRepository, JobRepository
+      domain/
+        model/         # Chapter, GenerationJob, AgentTraceEvent
+        usecase/       # CreateTextChapter, UploadChapter, StartJob, ObserveEvents
+      presentation/
+        onboarding/
+        home/
+        create/
+        generation/    # Progress screen + event feed
+        trace/         # Agent collaboration timeline
+        viewer/        # WebView wrapper
+      platform/
+        FilePicker.*
+        WebExperienceView.*
+```
+
+- Shared DTOs map exactly to backend §9/§10 contract (`snake_case` via `@SerialName`).
+- Platform-specific code is limited to file picking and WebView rendering.
+
+---
+
+## Slide 7: User Navigation Flow
+
+```
+Home
+  │
+  ▼
+Create Chapter (paste text or upload file)
+  │
+  ▼
+Generation Settings (audience, style, screens)
+  │
+  ▼
+Generation Progress (live SSE + agent feed)
+  │     \
+  │      ▼
+  │   Agent Trace (who did what)
+  │
+  ▼
+Experience Viewer (open public mini-site)
+```
+
+- Progress screen is the hub: user can jump to trace or open the final site as soon as it is ready.
+- SSE reconnects automatically; polling fallback every 2 seconds if SSE fails.
+
+---
+
+## Slide 8: Backend Architecture
 
 ```
 KMP Frontend
     │ REST upload/start
     ▼
 FastAPI API Layer
-    ├── Auth (lightweight, none for MVP public pages)
     ├── Job Manager
-    ├── Document Parser
-    └── SSE bus
+    ├── Document Parser (text / PDF)
+    ├── SSE Event Bus
+    └── Static File Serving
             │
             ▼
     LangGraph Workflow
@@ -86,99 +161,35 @@ FastAPI API Layer
     ┌───────┼───────┬───────────┬────────────┐
     ▼       ▼       ▼           ▼            ▼
 Coordinator  Structure  Pedagogy  Auto-Brainstorm  Visual Builder  Verifier
-    │               │
-    ▼               ▼
+    │
+    ▼
 Site Assembly → Validator → Static Storage → Public URL
 ```
 
-- **Invariant:** agent-to-agent handoffs ride Band `@mentions`; LangGraph is per-agent internal logic only.
-- **Acceptance test:** sever Band mid-job → job MUST stall (no `completed`, no published URL).
+- **Key invariant:** agent-to-agent handoffs ride Band `@mentions`; LangGraph is per-agent internal logic only.
 
 ---
 
-## Slide 7: The Agent Team in ChapterStage
+## Slide 9: The Agent Team
 
-| Agent | Responsibility |
-|-------|----------------|
-| **Coordinator** | Creates the chapter task, mentions specialists, decides continue/retry/fail, summarizes stages |
+| Agent | What it contributes |
+|-------|---------------------|
+| **Coordinator** | Creates the task, delegates to specialists, decides retry/fail/continue |
 | **Structure** | Extracts sections, key concepts, dependencies, narrative flow |
-| **Pedagogy** | Produces learning objectives, likely confusions, quiz points, interactive moments |
-| **Auto-Brainstorm** | Generates and scores presentation variants, selects the best candidate |
-| **Visual Builder** | Generates CSP-safe HTML/CSS/JS files and modular screen JSON |
-| **Verifier** | Checks source faithfulness, HTML validity, no unsafe JS, mobile responsiveness, accessibility, broken assets |
+| **Pedagogy** | Learning objectives, likely confusions, quiz points, interactive moments |
+| **Auto-Brainstorm** | Generates and scores presentation variants (courtroom debate, timeline, concept map, etc.) |
+| **Visual Builder** | Writes CSP-safe HTML/CSS/JS + modular screen JSON |
+| **Verifier** | Checks source faithfulness, HTML validity, no unsafe JS, mobile responsiveness, accessibility |
+
+Every agent posts structured trace events so the frontend can show a live collaboration timeline.
 
 ---
 
-## Slide 8: Security — The Generated Site Is Untrusted Until Proven Safe
+## Slide 10: The Generated Experience
 
-- Generated experiences are treated as **untrusted output** until validation passes.
-- Two layers of defense:
-  1. **Static validator** (`site_validator.py`) checks required files, metadata/manifest/screen schemas, size caps, no remote scripts, no `eval`, no `fetch`, no external iframes, no path traversal, and a strict CSP meta tag.
-  2. **Runtime CSP header** on `/public/experiences` enforces `default-src 'none'; script-src 'self'; connect-src 'self'` at the browser.
-- Why both? Regex deny-lists lose to obfuscation (`window['fet'+'ch']`). A browser-enforced allowlist does not.
-- Tests include evasive JS + CSP-desync negative controls. 24/24 validator checks pass; 7/7 runtime CSP checks pass.
+Each published site is a static-hostable directory:
 
----
-
-## Slide 9: Verification & Test Evidence
-
-All gates run offline (no SDK, no network) and exit nonzero on failure:
-
-| Test | What it proves | Result |
-|------|----------------|--------|
-| `envelopes.py` | Envelope schema + REJECT logic works | 12/12 |
-| `band_agent.py --selftest` | Role behaviors, consent block, done refusal | 10/10 |
-| `gate_band_loadbearing.py` | Band is load-bearing; loop stalls if severed | 16/16 |
-| `gate_langgraph_loadbearing.py` | Adapter-per-agent topology is load-bearing; master graph is removable | 13/13 |
-| `tests/test_api_jobs.py` | API + DB round-trip + §10 error codes | 11/11 |
-| `tests/test_site_validator.py` | Generated-site security gate | 24/24 |
-| `tests/test_public_csp.py` | Runtime CSP neutralizes evasive JS | 7/7 |
-| `tests/test_chapter_graph.py` | Workflow invariant over stubs | 11/11 |
-| `tests/test_m4_band_loadbearing.py` | Real workflow load-bearing over transport | 9/9 |
-| `tests/test_global_progress.py` | Anonymous global progress persists | 5/5 |
-| `tests/test_run_flow_script.py` | One-command demo runner | 6/6 |
-
-**Total passing gate checks:** 124+
-
----
-
-## Slide 10: API & Demo Flow
-
-Key endpoints (under `/api/v1`):
-
-- `POST /chapters/text` — create chapter from pasted text
-- `POST /chapters/upload` — upload PDF or TXT
-- `POST /generation-jobs` — start the agent workflow
-- `GET /generation-jobs/{job_id}` — poll status
-- `GET /generation-jobs/{job_id}/events` — SSE progress stream
-- `GET /generation-jobs/{job_id}/trace` — agent trace events
-- `GET /experiences/{experience_id}` — metadata
-- `GET/PUT /experiences/{experience_id}/progress` — anonymous global progress
-
-One-command demo:
-
-```bash
-./venv/bin/python chapterstage_backend/scripts/run_flow.py
-```
-
-Success ends with `PASS completed` plus a public experience URL.
-
----
-
-## Slide 11: LLM Provider Abstraction
-
-- **Local-first:** Ollama (default for development).
-- **Pluggable:** OpenAI, Anthropic/Claude, Featherless selectable via environment variables.
-- **Per-agent model routing** supported (e.g., small model for structure, larger model for visual builder).
-- Agents call a provider interface, not vendor SDKs directly, so the backend is portable across providers and budgets.
-
----
-
-## Slide 12: Modular Generated Site Contract
-
-Each published experience is a static-hostable directory:
-
-```
+```text
 {experience_id}/
   index.html
   styles.css
@@ -193,50 +204,172 @@ Each published experience is a static-hostable directory:
   assets/ (optional)
 ```
 
-- Shell renders one screen at a time, lazy-loads the next, and syncs progress with the same-origin backend.
-- Progress is **anonymous and global per experience** — no auth, cookies, or accounts required for MVP.
-- Screens support narrative scenes, diagrams, flow diagrams, timelines, state machines, concept maps, quizzes, and recaps.
+**Supported screen types:**
+
+- Narrative scene
+- Diagram / concept map
+- Flow diagram
+- Timeline
+- State machine
+- Process flow
+- Quiz / checkpoint
+- Recap checklist
+
+The shell renders one screen at a time, lazy-loads the next, and anonymously resumes the reader's last checkpoint.
 
 ---
 
-## Slide 13: What Is Implemented Now
+## Slide 11: Security — Safe by Default
 
-- ✅ FastAPI service with SQLModel persistence
-- ✅ Selectable Band transport: offline `test` mode and `live` SDK mode
-- ✅ Document parser for text and PDF
-- ✅ Job lifecycle, SSE events, agent trace persistence
-- ✅ Background job execution and publishing
+Generated content is **untrusted until validated**.
+
+**Static gate** (`site_validator.py`) checks:
+
+- Required files and schemas
+- No remote `<script src>` or external iframes
+- No `fetch`, `XMLHttpRequest`, `WebSocket`, `eval`, `Function(...)`
+- No inline event handlers
+- No path traversal
+- Strict CSP meta tag
+- Size caps
+
+**Runtime boundary** on `/public/experiences`:
+
+```
+Content-Security-Policy:
+  default-src 'none';
+  script-src 'self';
+  connect-src 'self';
+  frame-src 'none';
+  object-src 'none';
+  base-uri 'none'
+```
+
+Regex deny-lists lose to obfuscation (`window['fet'+'ch']`). A browser-enforced allowlist does not.
+
+---
+
+## Slide 12: Why Band? (The Load-Bearing Claim)
+
+The hackathon rule: Band must be part of the actual collaboration layer, not a notification mirror.
+
+We made this **falsifiable in code:**
+
+- `gate_band_loadbearing.py` drives the loop with Band alive (positive control), then severs Band mid-loop.
+- Result: the loop **must stall** — no `done`, no published site.
+- Negative controls and decoy sweeps prove the gate itself can go red.
+
+**Result:** 16/16 checks pass. Band is load-bearing in this build.
+
+`gate_langgraph_loadbearing.py` proves the same on the real workflow over the Band transport — 13/13 checks pass.
+
+---
+
+## Slide 13: API Contract (What the Frontend Consumes)
+
+Base path: `/api/v1`
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /health` | API health |
+| `POST /chapters/text` | Create chapter from pasted text |
+| `POST /chapters/upload` | Upload PDF/TXT |
+| `POST /generation-jobs` | Start agent workflow |
+| `GET /generation-jobs/{id}` | Poll status |
+| `GET /generation-jobs/{id}/events` | SSE progress + agent messages |
+| `GET /generation-jobs/{id}/trace` | Agent collaboration timeline |
+| `GET /experiences/{id}` | Published metadata |
+| `GET/PUT /experiences/{id}/progress` | Anonymous global progress |
+
+All errors use a stable shape:
+
+```json
+{
+  "error": {
+    "code": "CHAPTER_TOO_SHORT",
+    "message": "...",
+    "details": {}
+  }
+}
+```
+
+---
+
+## Slide 14: SSE Events the Frontend Receives
+
+Event types:
+
+- `job_progress` — status, progress, current step
+- `agent_message` — who acted and what happened
+- `brainstorm_variant` — concept being considered
+- `validation_report` — verifier results
+- `experience_ready` — final public URL
+- `job_failed` — terminal failure with code
+- `heartbeat` — keep-alive
+
+The frontend maps these into a progress bar, agent chips, and a scrollable event feed.
+
+---
+
+## Slide 15: LLM Provider Abstraction
+
+- **Local-first default:** Ollama (great for hackathon demos, no API spend).
+- **One-line swap:** OpenAI, Anthropic/Claude, or Featherless via env vars.
+- **Per-agent routing:** use a small cheap model for structure/brainstorm, a stronger model for the visual builder.
+
+This keeps ChapterStage portable across budgets, hardware, and providers without changing agent logic.
+
+---
+
+## Slide 16: Verification & Test Evidence
+
+All gates run offline (no SDK, no network) and exit nonzero on failure:
+
+| Test | Result |
+|------|--------|
+| `envelopes.py` | 12/12 |
+| `band_agent.py --selftest` | 10/10 |
+| `gate_band_loadbearing.py` | 16/16 |
+| `gate_langgraph_loadbearing.py` | 13/13 |
+| `tests/test_api_jobs.py` | 11/11 |
+| `tests/test_site_validator.py` | 24/24 |
+| `tests/test_public_csp.py` | 7/7 |
+| `tests/test_chapter_graph.py` | 11/11 |
+| `tests/test_m4_band_loadbearing.py` | 9/9 |
+| `tests/test_global_progress.py` | 5/5 |
+| `tests/test_run_flow_script.py` | 6/6 |
+
+**Total passing gate checks:** 124+
+
+---
+
+## Slide 17: Implementation Status
+
+**Done:**
+
+- ✅ FastAPI backend with SQLModel persistence
+- ✅ Text + PDF/TXT chapter ingestion
+- ✅ Selectable Band transport (test + live SDK)
+- ✅ Job lifecycle, SSE events, agent trace
+- ✅ Background execution and publishing
 - ✅ Modular generated-site shell
-- ✅ Strict site validator + runtime CSP
+- ✅ Site validator + runtime CSP security boundary
 - ✅ Anonymous global reader progress
-- ✅ Provider abstraction (Ollama, OpenAI, Anthropic, Featherless)
-- ✅ Provider-backed agent hooks preserving the Cell-on-Band handoff invariant
-- ✅ Load-bearing kill-test gates for both root chassis and ChapterStage backend
+- ✅ LLM provider abstraction (Ollama, OpenAI, Anthropic, Featherless)
+- ✅ Provider-backed agent hooks
+- ✅ Load-bearing kill-test gates
+
+**Next:**
+
+- Production migrations for Postgres
+- Live Band SDK smoke test with credentials
+- Richer visual components and animations
+- Provider retry/failure hardening
+- Frontend KMP integration and end-to-end mobile demo
 
 ---
 
-## Slide 14: What Remains / Next Steps
-
-- Production-grade schema migrations for non-SQLite databases.
-- Live Band SDK smoke testing with real credentials.
-- Richer generated visual components beyond the current modular shell.
-- Provider failure/retry hardening across all agent outputs.
-- Frontend KMP integration and end-to-end mobile demo.
-
----
-
-## Slide 15: Repos, Files, and How to Run
-
-- **Repo root:** `/Users/zeeshanali/Documents/Hackathons/Band Of Agents/backend/the-cell-on-band`
-- **Key files:**
-  - `README.md` — project overview
-  - `envelopes.py`, `band_agent.py`, `consent.py` — Cell-on-Band chassis
-  - `gate_band_loadbearing.py`, `gate_langgraph_loadbearing.py` — load-bearing kill tests
-  - `chapterstage_backend/` — FastAPI backend and ChapterStage workflow
-  - `chapterstage_backend_handoff.md` — full backend specification
-  - `chapterstage_backend/TESTING_FLOW.md` — step-by-step demo/test guide
-
-Quick start:
+## Slide 18: How to Run the Backend Demo
 
 ```bash
 python3 -m venv venv
@@ -244,11 +377,23 @@ python3 -m venv venv
 ./venv/bin/uvicorn app.main:app --app-dir chapterstage_backend --reload
 ```
 
+One-command happy-path flow:
+
+```bash
+./venv/bin/python chapterstage_backend/scripts/run_flow.py
+```
+
+Output ends with:
+
+```text
+PASS completed
+experience_id=...
+public_url=http://127.0.0.1:8000/public/experiences/.../index.html
+```
+
 Run all gates:
 
 ```bash
-./venv/bin/python envelopes.py
-./venv/bin/python band_agent.py --selftest
 ./venv/bin/python gate_band_loadbearing.py
 ./venv/bin/python gate_langgraph_loadbearing.py
 ./venv/bin/python chapterstage_backend/tests/test_api_jobs.py
@@ -261,23 +406,21 @@ Run all gates:
 
 ---
 
-## Slide 16: Closing Argument
+## Slide 19: Closing Argument
 
-- We did not just bolt Band onto a pre-existing workflow.
-- We built a loop where **Band is the bus**: sever it, and work stops.
-- We did not just claim our generated sites are safe.
-- We wrote a validator and browser-enforced CSP that survive obfuscation and desync attacks.
-- We did not hide the agent team in a black box.
-- Every handoff, trace event, and failure is observable through REST + SSE.
-- This is a working, tested, verifiable multi-agent software delivery system — built for Band.
+- ChapterStage is a real product: turn any chapter or topic into a visual, interactive learning experience.
+- It is safe by default: generated sites pass a strict validator and browser-enforced CSP before they ever get a public URL.
+- It is observable: users watch specialist agents collaborate in real time through the frontend trace.
+- It is honest: we prove Band is load-bearing — sever the room, and work stops.
+- This is not a slide about agents. This is a working system where agents build something useful, verifiable, and safe.
 
 ---
 
-## Appendix: Glossary for Slide Generation
+## Appendix: Glossary
 
-- **Envelope** — a fenced JSON block inside a Band message that carries structured handoff data.
-- **Load-bearing** — the platform is required for the workflow to make progress; removing it causes a verifiable stall.
+- **Envelope** — a fenced JSON block inside a Band message carrying structured handoff data.
+- **Load-bearing** — the platform is required for workflow progress; removing it causes a verifiable stall.
 - **CSP** — Content-Security-Policy, a browser-enforced allowlist for scripts and network connections.
-- **LangGraph** — framework for per-agent state machines; used here *inside* agents, not *between* them.
-- **Test transport** — deterministic offline Band stand-in used for gates.
+- **LangGraph** — per-agent state-machine framework; used inside agents, not between them.
+- **Test transport** — deterministic offline Band stand-in for gates.
 - **Live transport** — real Band SDK mode activated by `BAND_TRANSPORT_MODE=live`.
