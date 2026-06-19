@@ -33,7 +33,19 @@ class FakeProvider:
         if "Score" in messages[0]["content"]:
             return {"variant_id": "v9", "metric": "clarity", "value": 0.91}
         if "Create a modular screen storyboard" in messages[0]["content"]:
-            return {"scenes": [{"id": 7, "kind": "quiz"}]}
+            return {
+                "scenes": [{
+                    "id": 7,
+                    "component_type": "flow_diagram",
+                    "content": {
+                        "steps": [
+                            {"id": "a", "label": "A"},
+                            {"id": "b", "label": "B"},
+                        ],
+                        "edges": [{"from": "a", "to": "b", "label": "then"}],
+                    },
+                }]
+            }
         return {"result": "PASS", "receipts": "fake receipts"}
 
 
@@ -51,7 +63,7 @@ class LooseVerifierProvider:
 def clear_provider_env():
     for key in list(os.environ):
         if key.startswith(("OLLAMA_", "OPENAI_", "ANTHROPIC_", "FEATHERLESS_")) \
-                or key == "LLM_PROVIDER":
+                or key.startswith("LLM_PROVIDER"):
             os.environ.pop(key)
 
 
@@ -67,7 +79,7 @@ def main():
     original_create = chapter_agents.create_provider
     try:
         os.environ["OLLAMA_MODEL"] = "fake-local"
-        chapter_agents.create_provider = lambda: FakeProvider()
+        chapter_agents.create_provider = lambda role=None: FakeProvider()
         pack = chapter_agents.build_structure_pack(state)
         score = chapter_agents.build_brainstorm_score({"pack": pack})
         storyboard = chapter_agents.build_storyboard({"pack": pack, "score": score})
@@ -81,21 +93,33 @@ def main():
     check("configured provider supplies brainstorm score",
           score["variant_id"] == "v9" and score["value"] == 0.91, receipt=score)
     check("configured provider supplies storyboard",
-          storyboard["scenes"][0]["kind"] == "quiz", receipt=storyboard)
+          storyboard["scenes"][0]["kind"] == "flow_diagram"
+          and storyboard["scenes"][0]["content"]["edges"],
+          receipt=storyboard)
     check("configured provider supplies verifier verdict",
           verdict["result"] == "PASS" and verdict["receipts"] == "fake receipts",
           receipt=verdict)
+    prompt = chapter_agents._storyboard_prompt({  # noqa: SLF001 - contract gate
+        "source_text": "A script runs, hits a loop bug, then unlocks a notebook.",
+        "pack": {"sections": ["run", "bug", "fix"], "ideas": ["debugging"]},
+    })
+    check("storyboard prompt advertises diagram renderer contract",
+          "flow_diagram" in prompt and "timeline" in prompt
+          and "state_machine" in prompt and "edges" in prompt,
+          receipt=prompt[:500])
 
     original_create = chapter_agents.create_provider
     try:
         os.environ["OLLAMA_MODEL"] = "fake-local"
-        chapter_agents.create_provider = lambda: LooseVerifierProvider("verified")
+        chapter_agents.create_provider = (
+            lambda role=None: LooseVerifierProvider("verified"))
         loose_verdict = chapter_agents.build_verifier_verdict({
             "source_ref": "ch1",
             "source_text": "A source excerpt.",
             "storyboard": {"scenes": [{"id": "1", "kind": "text_screen"}]},
         })
-        chapter_agents.create_provider = lambda: LooseVerifierProvider("FAIL")
+        chapter_agents.create_provider = (
+            lambda role=None: LooseVerifierProvider("FAIL"))
         fail_verdict = chapter_agents.build_verifier_verdict({
             "source_ref": "ch1",
             "source_text": "A source excerpt.",

@@ -20,6 +20,16 @@ def _base(job_id: str) -> str:
     return "%s/api/v1/generation-jobs/%s" % (settings.API_BASE_URL, job_id)
 
 
+def _band_room_url(room_id: str | None) -> str | None:
+    template = settings.BAND_ROOM_URL_TEMPLATE.strip()
+    if not room_id or not template or "{room_id}" not in template:
+        return None
+    try:
+        return template.format(room_id=room_id)
+    except (KeyError, IndexError, ValueError):
+        return None
+
+
 def _job_status_response(job: GenerationJob) -> JobStatusResponse:
     error = None
     if job.error_code:
@@ -27,8 +37,9 @@ def _job_status_response(job: GenerationJob) -> JobStatusResponse:
     return JobStatusResponse(
         job_id=job.id, chapter_id=job.chapter_id, status=job.status,
         progress=job.progress, current_step=job.current_step,
-        band_room_id=job.band_room_id, experience_id=job.experience_id,
-        public_url=job.public_url, error=error,
+        band_room_id=job.band_room_id,
+        band_room_url=_band_room_url(job.band_room_id),
+        experience_id=job.experience_id, public_url=job.public_url, error=error,
         created_at=job.created_at, updated_at=job.updated_at)
 
 
@@ -51,6 +62,26 @@ async def create_job(
         background_tasks: BackgroundTasks,
         session: AsyncSession = Depends(get_session)) -> JobCreateResponse:
     job = await job_service.create_job(session, req)
+    background_tasks.add_task(job_service.run_generation_job, job.id)
+    return JobCreateResponse(
+        job_id=job.id, chapter_id=job.chapter_id, status=job.status,
+        status_url=_base(job.id), events_url=_base(job.id) + "/events")
+
+
+@router.post("/{job_id}/cancel", response_model=JobStatusResponse)
+async def cancel_job(
+        job_id: str,
+        session: AsyncSession = Depends(get_session)) -> JobStatusResponse:
+    job = await job_service.request_cancel_job(session, job_id)
+    return _job_status_response(job)
+
+
+@router.post("/{job_id}/retry", response_model=JobCreateResponse, status_code=202)
+async def retry_job(
+        job_id: str,
+        background_tasks: BackgroundTasks,
+        session: AsyncSession = Depends(get_session)) -> JobCreateResponse:
+    job = await job_service.retry_job(session, job_id)
     background_tasks.add_task(job_service.run_generation_job, job.id)
     return JobCreateResponse(
         job_id=job.id, chapter_id=job.chapter_id, status=job.status,
@@ -85,6 +116,7 @@ async def get_trace(
     return JobTraceResponse(
         job_id=job_id,
         band_room_id=job.band_room_id,
+        band_room_url=_band_room_url(job.band_room_id),
         events=[TraceEventResponse(
             id=e.id, agent_name=e.agent_name, event_type=e.event_type,
             title=e.title, message=e.message, payload=e.payload,

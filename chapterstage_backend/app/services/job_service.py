@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
-from app.errors import APIError, INVALID_REQUEST, JOB_NOT_FOUND
+from app.errors import APIError, INVALID_REQUEST, JOB_ALREADY_RUNNING, JOB_NOT_FOUND
 from app.models import (AgentTraceEvent, Book, Chapter, Experience, GenerationJob,
                         _now)
 from app.schemas import ChapterTextRequest, JobCreateRequest
@@ -24,6 +24,8 @@ from app.services import sse_bus
 from app.services.site_storage import write_modular_site
 
 logger = logging.getLogger(__name__)
+
+TERMINAL_STATUSES = {"completed", "failed_agent_workflow", "cancelled"}
 
 
 async def create_chapter_from_text(
@@ -86,6 +88,52 @@ async def get_job(session: AsyncSession, job_id: str) -> GenerationJob:
     return job
 
 
+async def request_cancel_job(session: AsyncSession, job_id: str) -> GenerationJob:
+    job = await get_job(session, job_id)
+    if job.status == "cancelled":
+        return job
+    if _is_terminal(job.status):
+        raise APIError(
+            JOB_ALREADY_RUNNING,
+            "Terminal job cannot be cancelled.",
+            {"job_id": job_id, "status": job.status},
+        )
+    job.cancel_requested_at = job.cancel_requested_at or _now()
+    if job.status == "queued":
+        return await _complete_cancelled_job(session, job)
+    job.status = "cancelling"
+    job.current_step = "Cancelling"
+    job.updated_at = _now()
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    await sse_bus.publish(job.id, "job_progress", {
+        "status": job.status,
+        "progress": job.progress,
+        "message": "Cancellation requested.",
+    })
+    logger.info("generation job cancellation requested job_id=%s", job.id)
+    return job
+
+
+async def retry_job(session: AsyncSession, job_id: str) -> GenerationJob:
+    original = await get_job(session, job_id)
+    if not _is_terminal(original.status):
+        raise APIError(
+            JOB_ALREADY_RUNNING,
+            "Only terminal jobs can be retried.",
+            {"job_id": job_id, "status": original.status},
+        )
+    req = JobCreateRequest(
+        chapter_id=original.chapter_id,
+        audience_level=original.audience_level,
+        experience_style=original.experience_style,
+        target_screen_count=original.target_screen_count,
+        enable_auto_brainstorm=original.enable_auto_brainstorm,
+    )
+    return await create_job(session, req)
+
+
 async def list_jobs(
         session: AsyncSession, limit: int = 20,
         offset: int = 0) -> list[GenerationJob]:
@@ -104,18 +152,27 @@ async def run_generation_job(job_id: str) -> None:
         job = await session.get(GenerationJob, job_id)
         if job is None:
             return
+        if await _finish_if_cancel_requested(session, job):
+            return
         chapter = await session.get(Chapter, job.chapter_id)
         if chapter is None:
             await _fail_job(session, job, "EXTRACTION_FAILED",
                             "Chapter source is missing.")
             return
+        band = None
         try:
             logger.info("generation job started job_id=%s chapter_id=%s",
                         job.id, job.chapter_id)
+            if await _finish_if_cancel_requested(session, job):
+                return
             await _set_job(session, job, "extracting", 0.10,
                            "Preparing chapter text.")
+            if await _finish_if_cancel_requested(session, job):
+                return
             await _set_job(session, job, "creating_band_room", 0.18,
                            "Creating Band chapter room.")
+            if await _finish_if_cancel_requested(session, job):
+                return
 
             from app.services.band_transport.factory import create_band_service
             from workflows.chapter_graph import ChapterWorkflow
@@ -123,10 +180,15 @@ async def run_generation_job(job_id: str) -> None:
             band = create_band_service()
             state = await asyncio.to_thread(
                 ChapterWorkflow(band).run,
-                job.id, chapter.title, chapter.source_text or "")
+                job.id, chapter.title, chapter.source_text or "",
+                audience_level=job.audience_level,
+                experience_style=job.experience_style,
+                target_screen_count=job.target_screen_count)
             job.band_room_id = getattr(band, "room_id", None)
             await session.commit()
             await _trace_handoffs(session, job, band)
+            if await _finish_if_cancel_requested(session, job):
+                return
 
             if state.get("status") != "completed":
                 await _trace_workflow_failure(session, job, state)
@@ -136,14 +198,19 @@ async def run_generation_job(job_id: str) -> None:
 
             await _set_job(session, job, "building_site", 0.72,
                            "Assembling modular chapter site.")
+            if await _finish_if_cancel_requested(session, job):
+                return
             experience_id = "exp_%s" % uuid4().hex
             public_url = "%s/%s/index.html" % (
                 settings.PUBLIC_SITE_BASE_URL.rstrip("/"), experience_id)
+            screens = _screens_for_chapter(chapter, state)
+            if await _finish_if_cancel_requested(session, job):
+                return
             write_modular_site(
                 experience_id=experience_id,
                 job_id=job.id,
                 title=chapter.title,
-                screens=_screens_for_chapter(chapter, state),
+                screens=screens,
                 metadata={
                     "book_title": chapter.title,
                     "chapter_title": chapter.title,
@@ -155,13 +222,17 @@ async def run_generation_job(job_id: str) -> None:
                     "engagement_score": 1,
                 },
             )
+            if await _finish_if_cancel_requested(session, job):
+                return
             await _set_job(session, job, "publishing", 0.90,
                            "Publishing validated chapter site.")
+            if await _finish_if_cancel_requested(session, job):
+                return
             exp = Experience(id=experience_id, job_id=job.id,
                              public_url=public_url,
                              storage_path=experience_id, meta={
                                  "chapter_title": chapter.title,
-                                 "screen_count": 3,
+                                 "screen_count": len(screens),
                              })
             session.add(exp)
             job.status = "completed"
@@ -180,8 +251,59 @@ async def run_generation_job(job_id: str) -> None:
             logger.info("generation job completed job_id=%s experience_id=%s",
                         job.id, experience_id)
         except Exception as exc:
+            if await _finish_if_cancel_requested(session, job):
+                return
             logger.exception("generation job failed job_id=%s", job.id)
             await _fail_job(session, job, "AGENT_WORKFLOW_FAILED", str(exc))
+        finally:
+            _close_band_transport(band)
+
+
+def _is_terminal(status: str) -> bool:
+    return status in TERMINAL_STATUSES
+
+
+def _close_band_transport(band) -> None:
+    transport = getattr(band, "transport", None)
+    close = getattr(transport, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception as exc:
+        logger.warning("failed to close Band transport cleanly: %s", exc)
+
+
+async def _finish_if_cancel_requested(
+        session: AsyncSession, job: GenerationJob) -> bool:
+    await session.refresh(job)
+    if job.status == "cancelled":
+        return True
+    if job.cancel_requested_at is None and job.status != "cancelling":
+        return False
+    await _complete_cancelled_job(session, job)
+    return True
+
+
+async def _complete_cancelled_job(
+        session: AsyncSession, job: GenerationJob) -> GenerationJob:
+    if job.status == "cancelled":
+        return job
+    now = _now()
+    job.status = "cancelled"
+    job.current_step = "Cancelled"
+    job.completed_at = job.completed_at or now
+    job.updated_at = now
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    logger.info("generation job cancelled job_id=%s", job.id)
+    await sse_bus.publish(job.id, "job_cancelled", {
+        "status": job.status,
+        "progress": job.progress,
+        "message": "Job cancelled.",
+    })
+    return job
 
 
 async def _set_job(
@@ -260,6 +382,7 @@ async def _trace_workflow_failure(
             "error_stage": state.get("error_stage"),
             "error_type": state.get("error_type"),
             "error": state.get("error"),
+            "transport_error": state.get("transport_error"),
             "log": state.get("log", []),
         },
     )
@@ -285,14 +408,101 @@ def _workflow_failure_message(state: dict) -> str:
 
 
 def _screens_for_chapter(chapter: Chapter, state: dict) -> list[dict]:
+    storyboard = _payload(state.get("storyboard"), "storyboard")
+    scenes = storyboard.get("scenes") if isinstance(storyboard, dict) else None
+    screens = []
+    if isinstance(scenes, list):
+        for index, scene in enumerate(scenes, start=1):
+            screen = _screen_from_scene(scene, index, chapter)
+            if screen is not None:
+                screens.append(screen)
+    if screens:
+        return screens
+    return _fallback_screens_for_chapter(chapter, state)
+
+
+def _screen_from_scene(scene, index: int, chapter: Chapter) -> dict | None:
+    if not isinstance(scene, dict):
+        return None
+    component_type = str(
+        scene.get("component_type") or scene.get("kind")
+        or "narrative_scene").strip() or "narrative_scene"
+    content = scene.get("content")
+    if not isinstance(content, dict):
+        content = {}
+    if not content:
+        content = {"text": str(scene.get("description") or "").strip()}
+    if not any(_truthy_content(v) for v in content.values()):
+        content = {"text": (chapter.source_text or "").strip()[:700]}
+    return {
+        "id": str(scene.get("id") or "screen_%d" % index),
+        "title": str(scene.get("title") or _component_title(component_type, index)),
+        "component_type": component_type,
+        "content": content,
+        "interactions": scene.get("interactions")
+        if isinstance(scene.get("interactions"), list) else [],
+    }
+
+
+def _fallback_screens_for_chapter(chapter: Chapter, state: dict) -> list[dict]:
     text = (chapter.source_text or "").strip()
     preview = text[:700] + ("..." if len(text) > 700 else "")
-    ideas = state.get("pack", {}).get("pack", {}).get("ideas", [])
-    return [
-        {"id": "intro", "title": chapter.title, "component_type": "text_screen",
-         "content": {"text": preview or "Chapter source prepared."}},
-        {"id": "map", "title": "Concept Map", "component_type": "concept_map",
-         "content": {"text": ", ".join(ideas) or "Key ideas are ready."}},
-        {"id": "recap", "title": "Recap", "component_type": "recap",
-         "content": {"text": "Review the checkpoint and continue learning."}},
+    pack = _payload(state.get("pack"), "pack")
+    ideas = [str(i) for i in pack.get("ideas", []) if str(i).strip()]
+    sections = [str(s) for s in pack.get("sections", []) if str(s).strip()]
+    nodes = [
+        {"label": idea, "detail": sections[i % len(sections)] if sections else ""}
+        for i, idea in enumerate(ideas[:6])
     ]
+    connections = [
+        {"from": ideas[i], "to": ideas[i + 1], "label": "builds toward"}
+        for i in range(max(0, min(len(ideas), 5) - 1))
+    ]
+    return [
+        {"id": "intro", "title": chapter.title, "component_type": "narrative_scene",
+         "content": {
+             "text": preview or "Chapter source prepared.",
+             "beats": sections[:4],
+             "callout": ideas[0] if ideas else "",
+         }},
+        {"id": "concept_map", "title": "Concept map",
+         "component_type": "concept_map",
+         "content": {
+             "text": "Key ideas are ready.",
+             "nodes": nodes,
+             "connections": connections,
+         }},
+        {"id": "recap", "title": "Recap", "component_type": "recap",
+         "content": {
+             "text": "Review the checkpoint and continue learning.",
+             "highlights": ideas[:4],
+         }},
+    ]
+
+
+def _payload(value, key: str) -> dict:
+    if isinstance(value, dict) and isinstance(value.get(key), dict):
+        return value[key]
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def _truthy_content(value) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return value is not None
+
+
+def _component_title(component_type: str, index: int) -> str:
+    labels = {
+        "narrative_scene": "Scene",
+        "text_screen": "Scene",
+        "concept_map": "Concept map",
+        "process_flow": "Process flow",
+        "quiz": "Checkpoint",
+        "recap": "Recap",
+    }
+    return "%s %d" % (labels.get(component_type, "Screen"), index)

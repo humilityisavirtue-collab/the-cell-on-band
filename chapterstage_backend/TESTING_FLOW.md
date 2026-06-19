@@ -47,6 +47,20 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5:7b
 ```
 
+Optional per-agent model routing is supported. For example, with Featherless you
+can use a smaller default model and reserve a larger model for the visual/site
+builder:
+
+```dotenv
+LLM_PROVIDER=featherless
+FEATHERLESS_API_KEY=replace-me
+FEATHERLESS_MODEL=small-or-cheap-model
+FEATHERLESS_MODEL_STRUCTURE=small-structure-model
+FEATHERLESS_MODEL_BRAINSTORM=small-brainstorm-model
+FEATHERLESS_MODEL_VISUAL_BUILDER=larger-code-generation-model
+FEATHERLESS_MODEL_VERIFIER=small-verifier-model
+```
+
 Adjust `OLLAMA_MODEL` to the exact name shown by:
 
 ```bash
@@ -73,6 +87,39 @@ Run this from the repository root and leave it running:
 
 The flow runner does not start or stop uvicorn. If the server is down, it fails
 at `GET /health` before creating any chapter.
+
+### Optional: expose the local server with ngrok
+
+Install requirements, add your ngrok authtoken to `chapterstage_backend/.env`,
+then start the public runner from the repository root:
+
+```dotenv
+NGROK_AUTHTOKEN=replace-me
+NGROK_DOMAIN=
+NGROK_BASIC_AUTH=
+```
+
+```bash
+./venv/bin/python chapterstage_backend/scripts/run_public.py \
+  --port 8000 \
+  --reload
+```
+
+The runner prints the ngrok public URL and starts uvicorn. For this process it
+automatically points `API_BASE_URL` at the ngrok URL and
+`PUBLIC_SITE_BASE_URL` at `<ngrok-url>/public/experiences`, so generated
+experience links are shareable.
+
+In another terminal, run the flow against the public URL:
+
+```bash
+./venv/bin/python chapterstage_backend/scripts/run_flow.py \
+  --base-url https://your-ngrok-domain.ngrok-free.app
+```
+
+Use `--ngrok-domain your-domain.ngrok.app` if you have a reserved domain. Use
+`--ngrok-basic-auth user:pass` for browser-only demos; the flow runner does not
+send tunnel credentials.
 
 ## 3. Run The Full Flow With One Command
 

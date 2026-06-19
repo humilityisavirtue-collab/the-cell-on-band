@@ -78,7 +78,7 @@ def main():
         check("GET /generation-jobs/{id} -> 200, round-trip status fetch",
               r.status_code == 200 and r.json().get("status")
               in ("queued", "extracting", "creating_band_room", "building_site",
-                  "publishing", "completed")
+                  "publishing", "completed", "cancelling", "cancelled")
               and r.json().get("chapter_id") == chapter_id, receipt=r.text)
 
         # -- NEGATIVE CONTROLS: real failure modes -> exact §10 codes

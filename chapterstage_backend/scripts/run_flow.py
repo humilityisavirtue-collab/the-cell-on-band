@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_PAYLOAD = BACKEND_DIR / "examples" / "kids_story_payload.json"
+DEFAULT_PAYLOAD = BACKEND_DIR / "examples" / "space_story_payload.json"
 DEFAULT_OUT_DIR = BACKEND_DIR / ".local" / "testing-flow" / "latest"
 
 sys.path.insert(0, str(BACKEND_DIR))

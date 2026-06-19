@@ -83,10 +83,10 @@ def main():
           and state["module"].get("kind") == "module")
 
     # -- MECHANICAL: every handoff actually went over the transport @mention path.
-    check("every handoff rode the transport (4 posts) — not a direct call",
-          len(tx.posts) == 4, receipt="posts=%d" % len(tx.posts))
-    check("handoffs are real @mentions (text names the target role + envelope)",
-          all(text.startswith("@%s" % to) and "kind" in text
+    check("every inter-agent handoff rode the transport (3 posts)",
+          len(tx.posts) == 3, receipt="posts=%d" % len(tx.posts))
+    check("transport handoffs are real @mentions to actual agents",
+          all(to != "room" and text.startswith("@%s" % to) and "kind" in text
               for to, text in tx.posts),
           receipt="posts=%r" % [(to, t[:20]) for to, t in tx.posts])
 

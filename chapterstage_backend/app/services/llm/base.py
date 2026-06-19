@@ -21,6 +21,7 @@ class ProviderConfig:
     model: str
     api_key: str = ""
     base_url: str = ""
+    fallback_model: str = ""
 
 
 class LLMProvider(Protocol):

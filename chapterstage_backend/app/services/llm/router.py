@@ -10,8 +10,8 @@ from .ollama_provider import OllamaProvider
 from .openai_provider import OpenAIProvider
 
 
-def select_provider_config() -> ProviderConfig:
-    requested = (os.environ.get("LLM_PROVIDER") or "auto").strip().lower()
+def select_provider_config(role: str | None = None) -> ProviderConfig:
+    requested = (_env("LLM_PROVIDER", role) or "auto").strip().lower()
     candidates = {
         "ollama": _ollama_config,
         "openai": _openai_config,
@@ -22,7 +22,7 @@ def select_provider_config() -> ProviderConfig:
     if requested != "auto":
         if requested not in candidates:
             raise LLMProviderError("Unknown LLM_PROVIDER %r." % requested)
-        config = candidates[requested]()
+        config = candidates[requested](role)
         if config is None:
             raise LLMProviderError(
                 "LLM_PROVIDER=%s is missing required env values." % requested)
@@ -30,7 +30,7 @@ def select_provider_config() -> ProviderConfig:
 
     for build in (_ollama_config, _openai_config, _anthropic_config,
                   _featherless_config):
-        config = build()
+        config = build(role)
         if config is not None:
             return config
     raise LLMProviderError(
@@ -38,8 +38,8 @@ def select_provider_config() -> ProviderConfig:
         "ANTHROPIC_API_KEY, or FEATHERLESS_API_KEY.")
 
 
-def create_provider():
-    config = select_provider_config()
+def create_provider(role: str | None = None):
+    config = select_provider_config(role)
     if config.name == "ollama":
         return OllamaProvider(config)
     if config.name == "openai":
@@ -51,41 +51,85 @@ def create_provider():
     raise LLMProviderError("Unsupported provider %r." % config.name)
 
 
-def _ollama_config() -> ProviderConfig | None:
-    model = os.environ.get("OLLAMA_MODEL", "").strip()
+def _ollama_config(role: str | None = None) -> ProviderConfig | None:
+    role_model = _role_env("OLLAMA_MODEL", role).strip()
+    global_model = os.environ.get("OLLAMA_MODEL", "").strip()
+    model = role_model or global_model
     if not model:
         return None
     return ProviderConfig(
         name="ollama", model=model,
-        base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"))
+        base_url=_env("OLLAMA_BASE_URL", role, "http://localhost:11434"),
+        fallback_model=_fallback_model(role_model, global_model))
 
 
-def _openai_config() -> ProviderConfig | None:
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
-    model = os.environ.get("OPENAI_MODEL", "").strip()
+def _openai_config(role: str | None = None) -> ProviderConfig | None:
+    key = _env("OPENAI_API_KEY", role).strip()
+    role_model = _role_env("OPENAI_MODEL", role).strip()
+    global_model = os.environ.get("OPENAI_MODEL", "").strip()
+    model = role_model or global_model
     if not key or not model:
         return None
     return ProviderConfig(
         name="openai", model=model, api_key=key,
-        base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
+        base_url=_env("OPENAI_BASE_URL", role, "https://api.openai.com/v1"),
+        fallback_model=_fallback_model(role_model, global_model))
 
 
-def _anthropic_config() -> ProviderConfig | None:
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    model = os.environ.get("ANTHROPIC_MODEL", "").strip()
+def _anthropic_config(role: str | None = None) -> ProviderConfig | None:
+    key = _env("ANTHROPIC_API_KEY", role).strip()
+    role_model = _role_env("ANTHROPIC_MODEL", role).strip()
+    global_model = os.environ.get("ANTHROPIC_MODEL", "").strip()
+    model = role_model or global_model
     if not key or not model:
         return None
     return ProviderConfig(
         name="anthropic", model=model, api_key=key,
-        base_url=os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com"))
+        base_url=_env("ANTHROPIC_BASE_URL", role, "https://api.anthropic.com"),
+        fallback_model=_fallback_model(role_model, global_model))
 
 
-def _featherless_config() -> ProviderConfig | None:
-    key = os.environ.get("FEATHERLESS_API_KEY", "").strip()
-    model = os.environ.get("FEATHERLESS_MODEL", "").strip()
+def _featherless_config(role: str | None = None) -> ProviderConfig | None:
+    key = _env("FEATHERLESS_API_KEY", role).strip()
+    role_model = _role_env("FEATHERLESS_MODEL", role).strip()
+    global_model = os.environ.get("FEATHERLESS_MODEL", "").strip()
+    model = role_model or global_model
     if not key or not model:
         return None
     return ProviderConfig(
         name="featherless", model=model, api_key=key,
-        base_url=os.environ.get(
-            "FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"))
+        base_url=_env(
+            "FEATHERLESS_BASE_URL", role, "https://api.featherless.ai/v1"),
+        fallback_model=_fallback_model(role_model, global_model))
+
+
+def _env(name: str, role: str | None = None, default: str = "") -> str:
+    value = _role_env(name, role)
+    if value:
+        return value
+    return os.environ.get(name, default)
+
+
+def _role_env(name: str, role: str | None = None) -> str:
+    for suffix in _role_suffixes(role):
+        value = os.environ.get("%s_%s" % (name, suffix), "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _fallback_model(role_model: str, global_model: str) -> str:
+    if role_model and global_model and role_model != global_model:
+        return global_model
+    return ""
+
+
+def _role_suffixes(role: str | None) -> list[str]:
+    if not role:
+        return []
+    normalized = role.strip().upper().replace("-", "_")
+    aliases = {
+        "VISUAL": ["VISUAL_BUILDER", "VISUAL"],
+        "VISUAL_BUILDER": ["VISUAL_BUILDER", "VISUAL"],
+    }
+    return aliases.get(normalized, [normalized])

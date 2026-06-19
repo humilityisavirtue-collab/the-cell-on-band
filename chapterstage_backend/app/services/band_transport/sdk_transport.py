@@ -40,11 +40,13 @@ class BandSdkTransport:
         self.posts: list[tuple[str, str]] = []
         self.participants: list[dict[str, Any]] = []
         self.last_error: str | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_thread: threading.Thread | None = None
 
     def open_room(self, room_id: str) -> str:
         async def _open() -> str:
             tools = self._agent_tools_cls("__chapterstage_bootstrap__", self.link.rest)
-            return await tools.create_chatroom(task_id=room_id)
+            return await tools.create_chatroom()
 
         self.room_id = self._run(_open())
         self.rooms.append(self.room_id)
@@ -94,16 +96,34 @@ class BandSdkTransport:
         self.alive = True
 
     def disconnect(self) -> None:
-        self._run(self.link.disconnect())
-        self.alive = False
+        try:
+            self._run(self.link.disconnect())
+        finally:
+            self.alive = False
+            self.close()
 
     def sever(self) -> None:
         self.alive = False
         try:
             if getattr(self.link, "is_connected", False):
                 self.disconnect()
+            else:
+                self.close()
         except Exception as exc:
             self.last_error = str(exc)
+            self.close()
+
+    def close(self) -> None:
+        loop = self._loop
+        thread = self._loop_thread
+        if loop is None:
+            return
+        if loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
+        self._loop = None
+        self._loop_thread = None
 
     def _room_tools(self):
         if not self.room_id:
@@ -111,27 +131,32 @@ class BandSdkTransport:
         return self._agent_tools_cls(
             self.room_id, self.link.rest, participants=self.participants)
 
-    @staticmethod
-    def _run(awaitable: Awaitable[Any]) -> Any:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(awaitable)
+    def _run(self, awaitable: Awaitable[Any]) -> Any:
+        loop = self._ensure_loop()
+        future = asyncio.run_coroutine_threadsafe(awaitable, loop)
+        return future.result()
 
-        result: dict[str, Any] = {}
+    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        loop = getattr(self, "_loop", None)
+        if loop is not None and loop.is_running():
+            return loop
+
+        ready = threading.Event()
+        loop = asyncio.new_event_loop()
 
         def runner() -> None:
-            try:
-                result["value"] = asyncio.run(awaitable)
-            except BaseException as exc:
-                result["error"] = exc
+            asyncio.set_event_loop(loop)
+            ready.set()
+            loop.run_forever()
+            loop.close()
 
-        thread = threading.Thread(target=runner, daemon=True)
+        thread = threading.Thread(
+            target=runner, name="BandSdkTransportLoop", daemon=True)
+        self._loop = loop
+        self._loop_thread = thread
         thread.start()
-        thread.join()
-        if "error" in result:
-            raise result["error"]
-        return result.get("value")
+        ready.wait(timeout=5)
+        return loop
 
 
 def _merge_participant(participants: list[dict[str, Any]], result: dict[str, Any]) -> None:

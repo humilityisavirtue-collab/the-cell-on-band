@@ -60,6 +60,7 @@ class GenerationJob(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     completed_at: datetime | None = None
+    cancel_requested_at: datetime | None = None
 
 
 class Experience(SQLModel, table=True):

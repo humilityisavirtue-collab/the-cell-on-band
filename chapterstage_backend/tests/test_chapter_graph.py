@@ -54,8 +54,8 @@ def main():
           receipt="module=%r" % state.get("module"))
 
     # -- MECHANICAL invariant: every transition went THROUGH band_service.
-    check("INVARIANT every inter-agent hop rode band_service (4 handoffs recorded)",
-          len(band.handoffs) == 4,
+    check("INVARIANT every inter-agent hop rode band_service (3 handoffs recorded)",
+          len(band.handoffs) == 3,
           receipt="handoffs=%r" % band.handoffs)
     check("INVARIANT all roles were recruited into the room",
           band.recruited == ["structure", "brainstorm", "visual", "verifier"],

@@ -36,13 +36,19 @@ class ChapterWorkflow:
             band_service = create_band_service()
         self.band = band_service
 
-    def run(self, job_id: str, source_ref: str, source_text: str = "") -> dict:
+    def run(
+            self, job_id: str, source_ref: str, source_text: str = "",
+            audience_level: str = "beginner", experience_style: str = "visual_story",
+            target_screen_count: int | None = None) -> dict:
         self.band.open_room(job_id)
         for role, _slot, _fn, _to in nodes.STAGES:
             self.band.recruit(role)
 
         state: dict = {"job_id": job_id, "source_ref": source_ref,
                        "source_text": source_text,
+                       "audience_level": audience_level,
+                       "experience_style": experience_style,
+                       "target_screen_count": target_screen_count,
                        "status": "running", "log": []}
 
         for role, slot, node_fn, to_role in nodes.STAGES:
@@ -64,12 +70,21 @@ class ChapterWorkflow:
                 return state
             state[slot] = env
             state["log"].append(role)
-            # THE INVARIANT: the handoff to the next role rides band_service. If the
-            # room is severed, the next agent is never triggered -> stall.
-            if not self.band.handoff(role, to_role, env):
+            # THE INVARIANT: each inter-agent handoff rides band_service. The
+            # verifier's module is terminal, so it is not @mentioned to a fake
+            # "room" participant.
+            if to_role is not None and not self.band.handoff(role, to_role, env):
                 state["status"] = "stalled"
+                state["error_stage"] = role
+                state["error"] = "Band handoff failed from %s to %s." % (
+                    role, to_role)
+                transport = getattr(self.band, "transport", None)
+                last_error = getattr(transport, "last_error", None)
+                if last_error:
+                    state["transport_error"] = last_error
                 return state
 
-        # completed ONLY if we got here: every handoff (incl. verifier->room) landed
+        # completed ONLY if we got here: every real inter-agent handoff landed and
+        # the verifier emitted a valid module.
         state["status"] = "completed"
         return state

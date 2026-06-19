@@ -48,6 +48,18 @@ python -m venv .venv
 
 The backend auto-loads [`.env`](</Users/zeeshanali/Documents/Hackathons/Band Of Agents/backend/the-cell-on-band/chapterstage_backend/.env>) on startup. Edit that file, then restart uvicorn to pick up changes.
 
+To expose the local server publicly through ngrok, set `NGROK_AUTHTOKEN` in
+`.env` or your shell, then run:
+
+```bash
+.venv/bin/python scripts/run_public.py
+```
+
+The runner opens the tunnel first, sets `API_BASE_URL` and
+`PUBLIC_SITE_BASE_URL` to the ngrok URL for this process, then starts uvicorn.
+Use `--ngrok-domain` for a reserved domain or `--ngrok-basic-auth user:pass` to
+protect the public tunnel during demos.
+
 Gates (offline, no network):
 
 ```bash

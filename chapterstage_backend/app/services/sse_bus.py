@@ -7,7 +7,8 @@ import logging
 from collections import defaultdict
 from datetime import datetime
 
-TERMINAL_EVENTS = {"experience_ready", "job_failed"}
+HEARTBEAT_SECONDS = 15.0
+TERMINAL_EVENTS = {"experience_ready", "job_failed", "job_cancelled"}
 logger = logging.getLogger(__name__)
 
 _events: dict[str, list[dict]] = defaultdict(list)
@@ -32,15 +33,25 @@ async def publish(job_id: str, event: str, data: dict) -> None:
     logger.info("sse event published job_id=%s event=%s", job_id, event)
 
 
-async def stream(job_id: str):
+async def stream(job_id: str, heartbeat_seconds: float = HEARTBEAT_SECONDS):
     cond = _condition(job_id)
     index = 0
     while True:
+        record = None
         async with cond:
-            while index >= len(_events[job_id]):
-                await cond.wait()
-            record = _events[job_id][index]
-            index += 1
+            if index >= len(_events[job_id]):
+                try:
+                    await asyncio.wait_for(cond.wait(), timeout=heartbeat_seconds)
+                except asyncio.TimeoutError:
+                    record = {"event": "heartbeat", "data": {
+                        "job_id": job_id,
+                        "created_at": datetime.utcnow().isoformat() + "Z",
+                    }}
+            if record is None and index < len(_events[job_id]):
+                record = _events[job_id][index]
+                index += 1
+        if record is None:
+            continue
         yield {"event": record["event"], "data": json.dumps(record["data"])}
         if record["event"] in TERMINAL_EVENTS:
             break

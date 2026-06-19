@@ -61,15 +61,15 @@ def visual_node(state: dict) -> dict:
 def verifier_node(state: dict) -> dict:
     _per_agent_graph("verifier").invoke({"log": []})
     return cse.make_envelope(
-        "module", state["job_id"], "verifier", "room",
+        "module", state["job_id"], "verifier", "coordinator",
         verdict=chapter_agents.build_verifier_verdict(state))
 
 
 # (from_role, slot, node_fn, to_role) — the artifact chain. to_role is who the
-# output is @mentioned to; chapter_graph routes it THROUGH band_service.
+# output is @mentioned to; None means the node emits the terminal local artifact.
 STAGES = [
     ("structure", "pack", structure_node, "brainstorm"),
     ("brainstorm", "score", brainstorm_node, "visual"),
     ("visual", "storyboard", visual_node, "verifier"),
-    ("verifier", "module", verifier_node, "room"),
+    ("verifier", "module", verifier_node, None),
 ]

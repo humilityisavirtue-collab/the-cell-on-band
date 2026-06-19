@@ -73,6 +73,8 @@ class Settings:
             os.environ.get("BAND_REST_URL", "https://app.band.ai"))
         self.BAND_WS_URL: str = os.environ.get(
             "BAND_WS_URL", "wss://app.band.ai/api/v1/socket/websocket")
+        self.BAND_ROOM_URL_TEMPLATE: str = os.environ.get(
+            "BAND_ROOM_URL_TEMPLATE", "")
         self.BAND_AGENT_UUID_COORDINATOR: str = os.environ.get(
             "BAND_AGENT_UUID_COORDINATOR", "")
         self.BAND_AGENT_UUID_STRUCTURE: str = os.environ.get(

@@ -1,6 +1,7 @@
 """Phase 6 gate: job execution, SSE replay, trace, and public URL."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -68,6 +69,12 @@ def main():
               and (site_path / "manifest.json").is_file()
               and (site_path / "screens" / "intro.json").is_file(),
               receipt=str(site_path))
+        manifest = json.loads((site_path / "manifest.json").read_text())
+        check("published site uses storyboard-driven visual screens",
+              "concept_map" in manifest["screen_order"]
+              and "checkpoint" in manifest["screen_order"]
+              and "quiz" in manifest["components_used"],
+              receipt=manifest)
 
         r = c.get("/api/v1/experiences/%s" % status["experience_id"])
         check("experience metadata endpoint returns public URL",

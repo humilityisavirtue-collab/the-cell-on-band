@@ -76,7 +76,7 @@ def test_transport_runs_and_severs_workflow():
     state = chapter_graph.ChapterWorkflow(band).run("job-factory", "Source")
     tx = band.transport
     check("factory test transport completes live workflow",
-          state["status"] == "completed" and len(tx.posts) == 4,
+          state["status"] == "completed" and len(tx.posts) == 3,
           receipt="status=%r posts=%r" % (state["status"], tx.posts))
     check("factory test transport recorded room and recruited roles",
           tx.rooms == ["room-job-factory"]

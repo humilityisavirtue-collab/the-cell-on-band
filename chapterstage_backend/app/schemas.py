@@ -62,6 +62,7 @@ class JobStatusResponse(BaseModel):
     progress: float
     current_step: Optional[str] = None
     band_room_id: Optional[str] = None
+    band_room_url: Optional[str] = None
     experience_id: Optional[str] = None
     public_url: Optional[str] = None
     error: Optional[dict] = None
@@ -88,6 +89,7 @@ class TraceEventResponse(BaseModel):
 class JobTraceResponse(BaseModel):
     job_id: str
     band_room_id: Optional[str] = None
+    band_room_url: Optional[str] = None
     events: list[TraceEventResponse] = Field(default_factory=list)
 
 

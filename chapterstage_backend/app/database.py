@@ -24,6 +24,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         migrated_reader_progress = await _migrate_global_reader_progress(conn)
         await conn.run_sync(SQLModel.metadata.create_all)
+        await _ensure_generation_jobs_cancel_column(conn)
         if migrated_reader_progress:
             await conn.execute(text("""
                 INSERT OR IGNORE INTO reader_progress (
@@ -57,6 +58,24 @@ async def _migrate_global_reader_progress(conn) -> bool:
     await conn.execute(text(
         "ALTER TABLE reader_progress RENAME TO reader_progress_user_scoped_backup"))
     return True
+
+
+async def _ensure_generation_jobs_cancel_column(conn) -> None:
+    """Add cancellation metadata to existing local SQLite dev databases."""
+    if conn.dialect.name != "sqlite":
+        return
+    exists = (await conn.execute(text(
+        "SELECT name FROM sqlite_master "
+        "WHERE type='table' AND name='generation_jobs'"
+    ))).scalar_one_or_none()
+    if not exists:
+        return
+    columns = (await conn.execute(
+        text("PRAGMA table_info(generation_jobs)"))).fetchall()
+    column_names = {row[1] for row in columns}
+    if "cancel_requested_at" not in column_names:
+        await conn.execute(text(
+            "ALTER TABLE generation_jobs ADD COLUMN cancel_requested_at DATETIME"))
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
